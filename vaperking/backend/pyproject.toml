@@ -1,0 +1,12 @@
+[project]
+name = "vaperking-backend"
+version = "1.0.0"
+description = "Sistema de gestión comercial para tiendas de vapeo"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
