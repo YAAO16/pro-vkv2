@@ -1,0 +1,108 @@
+# 1. Navegar a la carpeta del proyecto
+cd C:\Users\ADRIAN\Desktop\pro_vk\vaperking\backend
+
+# 2. Activar el entorno virtual
+venv\Scripts\activate
+
+# 3. Verificar que está activado (deberías ver (venv) al inicio de la línea)
+# Te aparecerá algo como: (venv) PS C:\...>
+
+# 4. Iniciar el servidor (si es necesario)
+uvicorn app.main:app --reload
+
+-----------------------------------------------
+desactivar
+
+deactivate
+
+--------------------------------------------------------
+database.py
+--------------------------------------------
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from app.config import settings
+import os
+import logging
+
+engine = create_engine(
+    settings.DATABASE_URL,
+    pool_pre_ping=True,
+    echo=settings.DEBUG
+)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+from app.models import Sede, Usuario, Producto, Categoria, Venta, VentaDetalle, InventarioDiario, CierreDiario
+
+logging.getLogger('sqlalchemy').setLevel(logging.ERROR)
+logging.getLogger('sqlalchemy.engine').setLevel(logging.ERROR)
+logging.getLogger('sqlalchemy.engine.Engine').disabled = True
+logging.getLogger('sqlalchemy.pool').setLevel(logging.ERROR)
+logging.getLogger('sqlalchemy.orm').setLevel(logging.ERROR)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+----------------------------------------------------------------
+axiosclient.ts
+import axios from 'axios';
+
+const apiClient = axios.create({
+    baseURL: 'http://localhost:8000/api/v1',  // Cambia a 8000 si es necesario
+    timeout: 30000,  // Aumenta el timeout
+    headers: {
+        'Content-Type': 'application/json',
+    },
+});
+
+// Interceptor para agregar el token
+apiClient.interceptors.request.use(
+    (config) => {
+        const token = localStorage.getItem('token');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        // Para FormData, no establecer Content-Type
+        if (config.data instanceof FormData) {
+            delete config.headers['Content-Type'];
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
+// Interceptor para manejar errores
+apiClient.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (error.response?.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = '/login';
+        } else if (error.response?.status === 403) {
+            console.error('No tiene permisos para esta acción');
+            alert('No tiene permisos suficientes');
+        } else if (error.response?.status === 404) {
+            console.error('Endpoint no encontrado:', error.config?.url);
+        }
+        return Promise.reject(error);
+    }
+);
+
+export default apiClient;
+---------------------------------------------
+vite.config.ts
+-------------------------------------------
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+})
