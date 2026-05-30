@@ -39,7 +39,7 @@ def stock_actual(
     sede_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(require_roles("admin", "vendedor", "inventario"))
-):
+): 
     """Obtiene el stock actual para una sede específica"""
     
     if current_user.rol == "vendedor":
@@ -121,111 +121,84 @@ def stock_total(
 def registrar_ajuste(
     ajuste: AjusteStockCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles("admin", "vendedor", "inventario"))
+    current_user: Usuario = Depends(require_roles("admin"))  # Solo admin
 ):
-    """Registra un ajuste de inventario (entrada o salida)"""
+    """
+    Registra un ajuste de inventario (entrada o salida).
     
+    🔒 SOLO ADMINISTRADORES - Pueden realizar ajustes de stock
+    """
     if ajuste.tipo not in ["entrada", "salida"]:
         raise HTTPException(status_code=400, detail="Tipo debe ser 'entrada' o 'salida'")
     
     if ajuste.cantidad <= 0:
         raise HTTPException(status_code=400, detail="La cantidad debe ser mayor a 0")
     
-    # Verificar sede
     sede = db.query(Sede).filter(Sede.id == ajuste.sede_id, Sede.activo == True).first()
     if not sede:
         raise HTTPException(status_code=404, detail="Sede no encontrada")
     
-    # Verificar permiso de vendedor
-    if current_user.rol == "vendedor" and current_user.sede_id != ajuste.sede_id:
-        raise HTTPException(status_code=403, detail="No tiene permisos para ajustar stock en esta sede")
-    
-    # Verificar producto
     producto = db.query(Producto).filter(Producto.id == ajuste.producto_id).first()
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
     
-    fecha_actual = date.today()
-    
-    # Obtener el registro más RECIENTE (incluyendo el de hoy si existe)
-    ultimo_registro = db.query(InventarioDiario).filter(
+    ultimo_inv = db.query(InventarioDiario).filter(
         InventarioDiario.sede_id == ajuste.sede_id,
         InventarioDiario.producto_id == ajuste.producto_id
-    ).order_by(InventarioDiario.fecha.desc(), InventarioDiario.id.desc()).first()
+    ).order_by(InventarioDiario.fecha.desc()).first()
     
-    # Determinar el stock actual (último stock_final registrado)
-    stock_actual = ultimo_registro.stock_final if ultimo_registro else 0
+    fecha_actual = date.today()
+    stock_anterior = ultimo_inv.stock_final if ultimo_inv else 0
     
-    # Verificar si ya existe un registro para hoy
-    registro_hoy = db.query(InventarioDiario).filter(
+    if ajuste.tipo == "entrada":
+        nuevo_stock = stock_anterior + ajuste.cantidad
+        entradas = ajuste.cantidad
+        salidas = 0
+        mensaje_tipo = "entrada"
+    else:
+        if stock_anterior < ajuste.cantidad:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Stock insuficiente. Stock actual: {stock_anterior}, Salida solicitada: {ajuste.cantidad}"
+            )
+        nuevo_stock = stock_anterior - ajuste.cantidad
+        entradas = 0
+        salidas = ajuste.cantidad
+        mensaje_tipo = "salida"
+    
+    inv_hoy = db.query(InventarioDiario).filter(
         InventarioDiario.sede_id == ajuste.sede_id,
         InventarioDiario.producto_id == ajuste.producto_id,
         InventarioDiario.fecha == fecha_actual
     ).first()
     
-    if registro_hoy:
-        # Si existe registro hoy, el stock_inicio debe ser el stock_actual ANTES de este ajuste
-        # pero como ya hay registros hoy, el stock_inicio debe ser el stock_final actual
-        # y luego sumamos/restamos
-        stock_inicio = registro_hoy.stock_final
+    if inv_hoy:
+        inv_hoy.entradas += entradas
+        inv_hoy.salidas += salidas
+        inv_hoy.stock_final = nuevo_stock
+        if ajuste.tipo == "entrada":
+            inv_hoy.stock_inicio = stock_anterior
+        mensaje = "Inventario actualizado para hoy"
     else:
-        # Si no hay registro hoy, el stock_inicio es el último stock_final registrado
-        stock_inicio = stock_actual
-    
-    # Calcular nuevo stock
-    if ajuste.tipo == "entrada":
-        nuevo_stock = stock_inicio + ajuste.cantidad
-        entradas = ajuste.cantidad
-        salidas = 0
-        operador = "+"
-    else:
-        if stock_inicio < ajuste.cantidad:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Stock insuficiente. Stock actual: {stock_inicio}, Salida solicitada: {ajuste.cantidad}"
-            )
-        nuevo_stock = stock_inicio - ajuste.cantidad
-        entradas = 0
-        salidas = ajuste.cantidad
-        operador = "-"
-    
-    if registro_hoy:
-        # Actualizar el registro de hoy
-        registro_hoy.entradas += entradas
-        registro_hoy.salidas += salidas
-        registro_hoy.stock_final = nuevo_stock
-        # No actualizar stock_inicio porque ya representa el inicio del día
-        mensaje = "Ajuste agregado al registro de hoy"
-    else:
-        # Crear nuevo registro para hoy
-        nuevo_registro = InventarioDiario(
+        nuevo_inv = InventarioDiario(
             sede_id=ajuste.sede_id,
             producto_id=ajuste.producto_id,
             fecha=fecha_actual,
-            stock_inicio=stock_inicio,
+            stock_inicio=stock_anterior,
             entradas=entradas,
             salidas=salidas,
             stock_final=nuevo_stock
         )
-        db.add(nuevo_registro)
+        db.add(nuevo_inv)
         mensaje = "Nuevo registro de inventario creado"
     
     db.commit()
     
-    # Obtener el registro actualizado para la respuesta
-    registro_actualizado = db.query(InventarioDiario).filter(
-        InventarioDiario.sede_id == ajuste.sede_id,
-        InventarioDiario.producto_id == ajuste.producto_id,
-        InventarioDiario.fecha == fecha_actual
-    ).first()
-    
     return {
-        "message": f"Ajuste de {ajuste.tipo} registrado correctamente",
-        "stock_anterior": stock_inicio,
-        "cantidad": ajuste.cantidad,
-        "operador": operador,
+        "message": f"Ajuste de {mensaje_tipo} registrado correctamente",
         "nuevo_stock": nuevo_stock,
-        "stock_final_bd": registro_actualizado.stock_final if registro_actualizado else nuevo_stock,
+        "stock_anterior": stock_anterior,
+        "cantidad": ajuste.cantidad,
         "detalle": mensaje
     }
 
@@ -316,7 +289,7 @@ def alertas_stock(
     sede_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(require_roles("admin", "vendedor", "inventario"))
-):
+): 
     """Obtiene los productos con stock por debajo del mínimo"""
     
     if current_user.rol == "vendedor":

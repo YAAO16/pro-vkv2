@@ -10,6 +10,7 @@ import Usuarios from '../Usuarios/Usuarios';
 import Observaciones from '../Observaciones/Observaciones';
 import ProductosDanados from '../ProductosDanados/ProductosDanados';
 import Sueldos from '../Sueldos/Sueldos';
+import Gastos from '../Gastos/Gastos';
 import HistorialAjustes from '../../components/HistorialAjustes';
 import '../../App.css';
 
@@ -109,8 +110,8 @@ const Dashboard: React.FC = () => {
             { id: 'dashboard', label: 'Dashboard', icon: '📊' },
             { id: 'ventas', label: 'Ventas', icon: '💰' },
             { id: 'inventario', label: 'Inventario', icon: '📦' },
-            { id: 'productos', label: 'Productos', icon: '🔧' },
             { id: 'cierres', label: 'Cierres', icon: '📅' },
+            { id: 'gastos', label: 'Gastos', icon: '💸' },
             { id: 'observaciones', label: 'Observaciones', icon: '📝' },      
             { id: 'danados', label: 'Dañados', icon: '🔨' }, 
         ];
@@ -120,6 +121,7 @@ const Dashboard: React.FC = () => {
             { id: 'usuarios', label: 'Usuarios', icon: '👥' },
             { id: 'sueldos', label: 'Sueldos', icon: '💰' },
             { id: 'historial', label: 'Historial Ajustes', icon: '📜' },
+            { id: 'productos', label: 'Productos', icon: '🔧' },
         ];
 
         if (isAdmin) {
@@ -137,7 +139,7 @@ const Dashboard: React.FC = () => {
         return 'PANEL DE CONTROL';
     };
 
-    const formatearFecha = (fecha: string) => {
+    /*const formatearFecha = (fecha: string) => {
         return new Date(fecha).toLocaleDateString('es-CO', {
             day: '2-digit',
             month: '2-digit',
@@ -145,7 +147,7 @@ const Dashboard: React.FC = () => {
             hour: '2-digit',
             minute: '2-digit'
         });
-    };
+    };*/
 
     const renderContent = () => {
         switch (activeMenu) {
@@ -459,7 +461,7 @@ const Dashboard: React.FC = () => {
             case 'ventas':
                 return <Ventas />;
             case 'inventario':
-                return <Inventario isAdmin={isAdmin} sedeId={sedeId} sedeNombre={sedeNombre} />;
+                return <Inventario />;
             case 'productos':
                 return <Productos isAdmin={isAdmin} />;
             case 'cierres':
@@ -474,6 +476,8 @@ const Dashboard: React.FC = () => {
                 return <ProductosDanados />;
             case 'sueldos':
                 return <Sueldos />;
+            case 'gastos':
+                return <Gastos />;
             case 'historial':
                 return <HistorialAjustes />;
             default:

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers import auth, ventas, productos, inventario, cierres, sedes, reportes, usuarios
-from app.routers import productos_danados, observaciones, sueldos_vendedores
+from app.routers import productos_danados, observaciones, sueldos_vendedores, gastos
 
 app = FastAPI(
     title="VaperKing API",
@@ -31,6 +31,7 @@ app.include_router(usuarios.router, prefix="/api/v1/usuarios", tags=["Usuarios"]
 app.include_router(productos_danados.router, prefix="/api/v1/productos-danados", tags=["Productos Dañados"])
 app.include_router(observaciones.router, prefix="/api/v1/observaciones", tags=["Observaciones"])
 app.include_router(sueldos_vendedores.router, prefix="/api/v1/sueldos", tags=["Sueldos Vendedores"])
+app.include_router(gastos.router, prefix="/api/v1", tags=["Gastos"])
 
 @app.get("/")
 def root():

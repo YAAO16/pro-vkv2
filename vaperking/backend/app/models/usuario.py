@@ -30,3 +30,4 @@ class Usuario(Base):
     ventas = relationship("Venta", foreign_keys="Venta.usuario_id", back_populates="usuario")
     ventas_anuladas = relationship("Venta", foreign_keys="Venta.anulada_por", back_populates="anulada_por_rel")
     cierres = relationship("CierreDiario", foreign_keys="CierreDiario.cerrado_por", back_populates="cerrado_por_rel")
+    gastos = relationship("Gasto", back_populates="usuario")

@@ -251,6 +251,22 @@ CREATE TABLE sueldos_vendedores (
     INDEX idx_fecha (mes, ano)
 );
 
+-- Tabla de gastos
+CREATE TABLE IF NOT EXISTS gastos (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    fecha DATE NOT NULL,
+    motivo VARCHAR(255) NOT NULL,
+    valor DECIMAL(12,2) NOT NULL,
+    descripcion TEXT,
+    sede_id INT NOT NULL,
+    usuario_id INT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (sede_id) REFERENCES sedes(id),
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+    INDEX idx_fecha (fecha),
+    INDEX idx_sede (sede_id)
+);
 -- ============================================
 -- DATOS DE PRUEBA
 -- ============================================

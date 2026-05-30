@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import apiClient from '../../api/axiosClient';
+import { useAuthStore } from '../../store/authStore';
 
 interface ProductoStock {
     producto_id: number;
@@ -10,16 +11,15 @@ interface ProductoStock {
     alerta: boolean;
 }
 
-interface InventarioProps {
-    isAdmin: boolean;
-    sedeId: number | null;
-    sedeNombre: string;
-}
+const Inventario: React.FC = () => {
+    const { usuario } = useAuthStore();
+    const isAdmin = usuario?.rol === 'admin' || usuario?.rol === 'ADMIN';
+    const sedeId: number | null = usuario?.sede_id ?? null;
+    const sedeNombre = (usuario as any)?.sede_nombre || ''; // Solución temporal para sede_nombre
 
-const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) => {
     const [productos, setProductos] = useState<ProductoStock[]>([]);
     const [loading, setLoading] = useState(true);
-    const [selectedSede, setSelectedSede] = useState<number | null>(sedeId);
+    const [selectedSede, setSelectedSede] = useState<number | null>(null);
     const [sedes, setSedes] = useState<any[]>([]);
     const [showAjusteModal, setShowAjusteModal] = useState(false);
     const [selectedProducto, setSelectedProducto] = useState<ProductoStock | null>(null);
@@ -27,6 +27,7 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
     const [tipoAjuste, setTipoAjuste] = useState<'entrada' | 'salida'>('entrada');
     const [motivo, setMotivo] = useState('');
     const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState('');
 
     useEffect(() => {
         cargarInventario();
@@ -38,7 +39,6 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
     const cargarSedes = async () => {
         try {
             const response = await apiClient.get('/sedes/');
-            // La respuesta puede ser {sedes: []} o un array directo
             const sedesData = response.data.sedes || response.data;
             setSedes(Array.isArray(sedesData) ? sedesData : []);
         } catch (error) {
@@ -51,7 +51,7 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
             setLoading(true);
             setError(null);
             
-            // Para admin, si no hay sede seleccionada, usar endpoint de stock total
+            // Para admin, si no hay sede seleccionada, usar stock total
             if (isAdmin && selectedSede === null) {
                 const response = await apiClient.get('/stock-total');
                 setProductos(response.data);
@@ -78,14 +78,16 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
 
     const handleAjuste = async () => {
         if (!selectedProducto || cantidadAjuste <= 0) {
-            alert('Ingrese una cantidad válida');
+            setError('Ingrese una cantidad válida');
+            setTimeout(() => setError(''), 3000);
             return;
         }
 
         try {
             const sede = selectedSede || sedeId;
             if (!sede) {
-                alert('No se ha seleccionado una sede');
+                setError('No se ha seleccionado una sede');
+                setTimeout(() => setError(''), 3000);
                 return;
             }
 
@@ -101,11 +103,13 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
             setSelectedProducto(null);
             setCantidadAjuste(0);
             setMotivo('');
+            setSuccess('Ajuste realizado exitosamente');
+            setTimeout(() => setSuccess(''), 3000);
             await cargarInventario();
-            alert('Ajuste realizado exitosamente');
         } catch (error: any) {
             console.error('Error realizando ajuste:', error);
-            alert(error.response?.data?.detail || 'Error al realizar el ajuste');
+            setError(error.response?.data?.detail || 'Error al realizar el ajuste');
+            setTimeout(() => setError(''), 3000);
         }
     };
 
@@ -117,10 +121,6 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
 
     if (loading) {
         return <div style={{ textAlign: 'center', padding: '2rem', color: '#00ff88' }}>CARGANDO INVENTARIO...</div>;
-    }
-
-    if (error) {
-        return <div style={{ textAlign: 'center', padding: '2rem', color: '#ff4444' }}>❌ {error}</div>;
     }
 
     return (
@@ -153,6 +153,10 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
                 )}
             </div>
 
+            {/* Mensajes */}
+            {error && <div style={{ background: 'rgba(255,68,68,0.15)', border: '1px solid #ff4444', color: '#ff4444', padding: '0.75rem', borderRadius: '0.5rem', marginBottom: '1rem', fontSize: '0.8rem' }}>❌ {error}</div>}
+            {success && <div style={{ background: 'rgba(0,255,136,0.15)', border: '1px solid #00ff88', color: '#00ff88', padding: '0.75rem', borderRadius: '0.5rem', marginBottom: '1rem', fontSize: '0.8rem' }}>✅ {success}</div>}
+
             {/* Info de sede para no admin */}
             {!isAdmin && sedeNombre && (
                 <div style={{ marginBottom: '1rem', padding: '0.5rem', background: 'rgba(0,255,136,0.1)', borderRadius: '0.5rem', fontSize: '0.8rem', color: '#00ff88' }}>
@@ -175,7 +179,9 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
                                 <th style={{ padding: '0.75rem', textAlign: 'right', color: '#64748b', fontSize: '0.7rem' }}>Stock Actual</th>
                                 <th style={{ padding: '0.75rem', textAlign: 'right', color: '#64748b', fontSize: '0.7rem' }}>Stock Mínimo</th>
                                 <th style={{ padding: '0.75rem', textAlign: 'center', color: '#64748b', fontSize: '0.7rem' }}>Estado</th>
-                                <th style={{ padding: '0.75rem', textAlign: 'center', color: '#64748b', fontSize: '0.7rem' }}>Acciones</th>
+                                {isAdmin && (
+                                    <th style={{ padding: '0.75rem', textAlign: 'center', color: '#64748b', fontSize: '0.7rem' }}>Acciones</th>
+                                )}
                             </tr>
                         </thead>
                         <tbody>
@@ -184,7 +190,10 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
                                 return (
                                     <tr key={p.producto_id} style={{ borderBottom: '1px solid #1a1a1a' }}>
                                         <td style={{ padding: '0.75rem', fontSize: '0.75rem' }}>{p.sku}</td>
-                                        <td style={{ padding: '0.75rem', fontSize: '0.75rem' }}>{p.nombre}</td>
+                                        <td style={{ padding: '0.75rem', fontSize: '0.75rem' }}>
+                                            <div><strong>{p.nombre}</strong></div>
+                                            <div style={{ fontSize: '0.65rem', color: '#64748b' }}>ID: {p.producto_id}</div>
+                                        </td>
                                         <td style={{ padding: '0.75rem', textAlign: 'right', fontSize: '0.75rem', fontWeight: 'bold', color: status.color }}>
                                             {p.stock_actual}
                                         </td>
@@ -194,25 +203,27 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
                                                 {status.icon} {status.text}
                                             </span>
                                         </td>
-                                        <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                                            <button
-                                                onClick={() => {
-                                                    setSelectedProducto(p);
-                                                    setShowAjusteModal(true);
-                                                }}
-                                                style={{
-                                                    background: '#00ff88',
-                                                    border: 'none',
-                                                    borderRadius: '0.25rem',
-                                                    padding: '0.25rem 0.5rem',
-                                                    cursor: 'pointer',
-                                                    color: '#000',
-                                                    fontSize: '0.7rem'
-                                                }}
-                                            >
-                                                ✏️ Ajustar
-                                            </button>
-                                        </td>
+                                        {isAdmin && (
+                                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                                                <button
+                                                    onClick={() => {
+                                                        setSelectedProducto(p);
+                                                        setShowAjusteModal(true);
+                                                    }}
+                                                    style={{
+                                                        background: '#00ff88',
+                                                        border: 'none',
+                                                        borderRadius: '0.25rem',
+                                                        padding: '0.25rem 0.5rem',
+                                                        cursor: 'pointer',
+                                                        color: '#000',
+                                                        fontSize: '0.7rem'
+                                                    }}
+                                                >
+                                                    ✏️ Ajustar
+                                                </button>
+                                            </td>
+                                        )}
                                     </tr>
                                 );
                             })}
@@ -221,8 +232,8 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
                 </div>
             )}
 
-            {/* Modal de Ajuste */}
-            {showAjusteModal && selectedProducto && (
+            {/* Modal de Ajuste - SOLO PARA ADMIN */}
+            {isAdmin && showAjusteModal && selectedProducto && (
                 <div style={{
                     position: 'fixed',
                     top: 0,
@@ -246,21 +257,23 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
                         <h3 style={{ color: '#00ff88', marginBottom: '1rem' }}>✏️ Ajustar Stock</h3>
                         <p style={{ marginBottom: '1rem' }}>Producto: <strong>{selectedProducto.nombre}</strong></p>
                         <p style={{ marginBottom: '1rem' }}>Stock actual: <strong style={{ color: '#00ff88' }}>{selectedProducto.stock_actual}</strong></p>
+                        <p style={{ marginBottom: '1rem', fontSize: '0.8rem', color: '#64748b' }}>
+                            Stock mínimo: <strong>{selectedProducto.stock_minimo}</strong>
+                        </p>
 
                         <div style={{ marginBottom: '1rem' }}>
-                            <label style={{ fontSize: '0.7rem', color: '#64748b' }}>TIPO DE AJUSTE</label>
+                            <label style={{ fontSize: '0.7rem', color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>TIPO DE AJUSTE</label>
                             <select
                                 value={tipoAjuste}
                                 onChange={(e) => setTipoAjuste(e.target.value as 'entrada' | 'salida')}
                                 style={{
                                     width: '100%',
                                     padding: '0.5rem',
-                                    background: '#0a0a0a',
+                                    background: '#1a1a1a',
                                     border: '1px solid #1e293b',
                                     borderRadius: '0.5rem',
                                     color: 'white',
-                                    fontSize: '0.8rem',
-                                    marginTop: '0.25rem'
+                                    fontSize: '0.8rem'
                                 }}
                             >
                                 <option value="entrada">➕ Entrada (agregar stock)</option>
@@ -269,7 +282,7 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
                         </div>
 
                         <div style={{ marginBottom: '1rem' }}>
-                            <label style={{ fontSize: '0.7rem', color: '#64748b' }}>CANTIDAD</label>
+                            <label style={{ fontSize: '0.7rem', color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>CANTIDAD</label>
                             <input
                                 type="number"
                                 value={cantidadAjuste}
@@ -278,18 +291,17 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
                                 style={{
                                     width: '100%',
                                     padding: '0.5rem',
-                                    background: '#0a0a0a',
+                                    background: '#1a1a1a',
                                     border: '1px solid #1e293b',
                                     borderRadius: '0.5rem',
                                     color: 'white',
-                                    fontSize: '0.8rem',
-                                    marginTop: '0.25rem'
+                                    fontSize: '0.8rem'
                                 }}
                             />
                         </div>
 
-                        <div style={{ marginBottom: '1.5rem' }}>
-                            <label style={{ fontSize: '0.7rem', color: '#64748b' }}>MOTIVO (opcional)</label>
+                        <div style={{ marginBottom: '1rem' }}>
+                            <label style={{ fontSize: '0.7rem', color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>MOTIVO (opcional)</label>
                             <input
                                 type="text"
                                 value={motivo}
@@ -298,17 +310,16 @@ const Inventario: React.FC<InventarioProps> = ({ isAdmin, sedeId, sedeNombre }) 
                                 style={{
                                     width: '100%',
                                     padding: '0.5rem',
-                                    background: '#0a0a0a',
+                                    background: '#1a1a1a',
                                     border: '1px solid #1e293b',
                                     borderRadius: '0.5rem',
                                     color: 'white',
-                                    fontSize: '0.8rem',
-                                    marginTop: '0.25rem'
+                                    fontSize: '0.8rem'
                                 }}
                             />
                         </div>
 
-                        <div style={{ display: 'flex', gap: '1rem' }}>
+                        <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
                             <button onClick={handleAjuste} style={{ flex: 1, padding: '0.5rem', background: '#00ff88', border: 'none', borderRadius: '0.5rem', color: '#000', cursor: 'pointer', fontWeight: 'bold' }}>
                                 CONFIRMAR
                             </button>

@@ -13,7 +13,7 @@ export const api = {
     updateSede: (id: number, data: any) => apiClient.put(`/sedes/${id}`, data),
     
     // Productos
-    getProductos: () => apiClient.get('/productos/'),
+    getProductos: () => apiClient.get('/productos'),
     getCategorias: () => apiClient.get('/productos/categorias/'),
     createProducto: (data: any) => apiClient.post('/productos/', data),
     updateProducto: (id: number, data: any) => apiClient.put(`/productos/${id}`, data),

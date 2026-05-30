@@ -20,3 +20,4 @@ class Sede(Base):
     ventas = relationship("Venta", back_populates="sede")
     inventarios = relationship("InventarioDiario", back_populates="sede")
     cierres = relationship("CierreDiario", back_populates="sede")
+    gastos = relationship("Gasto", back_populates="sede")

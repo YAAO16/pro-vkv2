@@ -14,6 +14,7 @@ interface Venta {
     notas: string;
     anulada: boolean;
     sede_nombre?: string;
+    detalles?: VentaDetalle[];
 }
 
 interface VentaDetalle {
@@ -22,11 +23,8 @@ interface VentaDetalle {
     nombre_producto: string;
     cantidad: number;
     precio_unit: number;
+    precio_original?: number;
     subtotal: number;
-}
-
-interface VentaCompleta extends Venta {
-    detalles?: VentaDetalle[];
 }
 
 interface Producto {
@@ -50,16 +48,27 @@ interface Usuario {
     rol: string;
 }
 
+interface AjusteData {
+    producto_id: number;
+    precio_original: number;
+    precio_nuevo: number;
+}
+
 const Ventas: React.FC = () => {
     const { isAdmin, isVendedor, sedeId } = useAuth();
-    const [ventas, setVentas] = useState<VentaCompleta[]>([]);
+    const [ventas, setVentas] = useState<Venta[]>([]);
     const [productos, setProductos] = useState<Producto[]>([]);
     const [usuarios, setUsuarios] = useState<Usuario[]>([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [showDetailModal, setShowDetailModal] = useState(false);
-    const [selectedVenta, setSelectedVenta] = useState<VentaCompleta | null>(null);
-    const [selectedProducts, setSelectedProducts] = useState<{ producto_id: number; cantidad: number; precio_unit: number }[]>([]);
+    const [selectedVenta, setSelectedVenta] = useState<Venta | null>(null);
+    const [selectedProducts, setSelectedProducts] = useState<{ 
+        producto_id: number; 
+        cantidad: number; 
+        precio_unit: number;
+        precio_original?: number;
+    }[]>([]);
     const [metodoPago, setMetodoPago] = useState('efectivo');
     const [notas, setNotas] = useState('');
     const [error, setError] = useState('');
@@ -73,6 +82,9 @@ const Ventas: React.FC = () => {
     const [filtroUsuario, setFiltroUsuario] = useState<number | null>(null);
     const [totalVentas, setTotalVentas] = useState(0);
     const [totalIngresos, setTotalIngresos] = useState(0);
+    
+    // Estado para el ajuste de precio
+    const [ajusteData, setAjusteData] = useState<AjusteData | null>(null);
 
     useEffect(() => {
         cargarVentas();
@@ -116,7 +128,6 @@ const Ventas: React.FC = () => {
             const response = await api.getVentas(params);
             let ventasData = response.data.ventas || response.data;
             
-            // Enriquecer ventas con detalles y nombres de vendedor
             for (let i = 0; i < ventasData.length; i++) {
                 try {
                     const detallesResponse = await api.getVentaDetalles(ventasData[i].id);
@@ -135,8 +146,8 @@ const Ventas: React.FC = () => {
             
             setVentas(ventasData);
             
-            const totalV = ventasData.reduce((sum: number, v: VentaCompleta) => sum + (v.anulada ? 0 : 1), 0);
-            const totalI = ventasData.reduce((sum: number, v: VentaCompleta) => sum + (v.anulada ? 0 : v.total), 0);
+            const totalV = ventasData.reduce((sum: number, v: Venta) => sum + (v.anulada ? 0 : 1), 0);
+            const totalI = ventasData.reduce((sum: number, v: Venta) => sum + (v.anulada ? 0 : v.total), 0);
             setTotalVentas(totalV);
             setTotalIngresos(totalI);
         } catch (error) {
@@ -149,10 +160,22 @@ const Ventas: React.FC = () => {
 
     const cargarProductos = async () => {
         try {
+            console.log('Cargando productos desde:', '/productos');
             const response = await api.getProductos();
-            setProductos(response.data);
+            console.log('Productos recibidos:', response.data);
+            
+            // Verificar que response.data es un array
+            if (Array.isArray(response.data)) {
+                setProductos(response.data);
+            } else if (response.data.productos) {
+                setProductos(response.data.productos);
+            } else {
+                console.error('Formato de respuesta inesperado:', response.data);
+                setProductos([]);
+            }
         } catch (error) {
             console.error('Error cargando productos:', error);
+            setError('Error al cargar los productos');
         }
     };
 
@@ -170,7 +193,8 @@ const Ventas: React.FC = () => {
                 detalles: selectedProducts.map(p => ({
                     producto_id: p.producto_id,
                     cantidad: p.cantidad,
-                    precio_unit: p.precio_unit
+                    precio_unit: p.precio_unit,
+                    precio_original: p.precio_original
                 }))
             };
 
@@ -190,7 +214,7 @@ const Ventas: React.FC = () => {
         }
     };
 
-    const handleAnular = async (venta: VentaCompleta) => {
+    const handleAnular = async (venta: Venta) => {
         if (venta.anulada) {
             setError('Esta venta ya está anulada');
             return;
@@ -210,14 +234,8 @@ const Ventas: React.FC = () => {
         }
     };
 
-    const verDetalle = async (venta: VentaCompleta) => {
+    const verDetalle = async (venta: Venta) => {
         try {
-            if (venta.detalles && venta.detalles.length > 0) {
-                setSelectedVenta(venta);
-                setShowDetailModal(true);
-                return;
-            }
-            
             const response = await api.getVentaDetalles(venta.id);
             const ventaConDetalles = { ...venta, detalles: response.data };
             setSelectedVenta(ventaConDetalles);
@@ -240,7 +258,8 @@ const Ventas: React.FC = () => {
             setSelectedProducts([...selectedProducts, {
                 producto_id: producto.id,
                 cantidad: 1,
-                precio_unit: producto.precio_venta
+                precio_unit: producto.precio_venta,
+                precio_original: undefined
             }]);
         }
     };
@@ -255,6 +274,16 @@ const Ventas: React.FC = () => {
         const nuevos = [...selectedProducts];
         nuevos[index].cantidad = cantidad;
         setSelectedProducts(nuevos);
+    };
+
+    const ajustarPrecio = (index: number, nuevoPrecio: number) => {
+        const nuevos = [...selectedProducts];
+        const productoOriginal = productos.find(p => p.id === nuevos[index].producto_id);
+        
+        nuevos[index].precio_unit = nuevoPrecio;
+        nuevos[index].precio_original = productoOriginal?.precio_venta;
+        setSelectedProducts(nuevos);
+        setAjusteData(null);
     };
 
     const calcularTotal = () => {
@@ -278,7 +307,7 @@ const Ventas: React.FC = () => {
         return metodo === 'efectivo' ? '#00ff88' : '#00aaff';
     };
 
-    const getNombreVendedor = (venta: VentaCompleta) => {
+    const getNombreVendedor = (venta: Venta) => {
         if (venta.nombre_usuario) return venta.nombre_usuario;
         const usuarioEncontrado = usuarios.find(u => u.id === venta.usuario_id);
         return usuarioEncontrado?.nombre_completo || usuarioEncontrado?.username || `ID: ${venta.usuario_id}`;
@@ -449,7 +478,7 @@ const Ventas: React.FC = () => {
             {/* Modal de Nueva Venta */}
             {showModal && (
                 <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-                    <div style={{ background: '#0a0a0a', border: '1px solid #00ff88', borderRadius: '0.9rem', padding: '1.8rem', width: '90%', maxWidth: '500px', maxHeight: '80vh', overflow: 'auto' }}>
+                    <div style={{ background: '#0a0a0a', border: '1px solid #00ff88', borderRadius: '0.9rem', padding: '1.8rem', width: '90%', maxWidth: '600px', maxHeight: '80vh', overflow: 'auto' }}>
                         <h3 style={{ color: '#00ff88', marginBottom: '0.9rem', fontSize: '1.12rem' }}>💰 NUEVA VENTA</h3>
                         
                         <div style={{ marginBottom: '0.9rem' }}>
@@ -481,8 +510,9 @@ const Ventas: React.FC = () => {
                             ) : (
                                 selectedProducts.map((item, idx) => {
                                     const prod = productos.find(p => p.id === item.producto_id);
+                                    const tieneAjuste = item.precio_original && item.precio_original !== item.precio_unit;
                                     return (
-                                        <div key={idx} style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', marginBottom: '0.45rem', padding: '0.45rem', background: '#111', borderRadius: '0.45rem' }}>
+                                        <div key={idx} style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', marginBottom: '0.45rem', padding: '0.45rem', background: '#111', borderRadius: '0.45rem', flexWrap: 'wrap' }}>
                                             <span style={{ flex: 2, fontSize: '0.72rem' }}>{prod?.nombre}</span>
                                             <input 
                                                 type="number" 
@@ -493,7 +523,23 @@ const Ventas: React.FC = () => {
                                             <span style={{ width: '80px', fontSize: '0.72rem', color: '#00ff88', textAlign: 'right' }}>
                                                 ${(item.cantidad * item.precio_unit).toLocaleString()}
                                             </span>
+                                            <button
+                                                onClick={() => setAjusteData({
+                                                    producto_id: item.producto_id,
+                                                    precio_original: item.precio_original || item.precio_unit,
+                                                    precio_nuevo: item.precio_unit
+                                                })}
+                                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', color: '#00ff88' }}
+                                                title="Ajustar precio"
+                                            >
+                                                ✏️
+                                            </button>
                                             <button onClick={() => eliminarProducto(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ff4444', fontSize: '0.9rem' }}>❌</button>
+                                            {tieneAjuste && (
+                                                <div style={{ width: '100%', fontSize: '0.6rem', color: '#ffaa00' }}>
+                                                    Precio ajustado (original: ${item.precio_original?.toLocaleString()})
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 })
@@ -521,6 +567,65 @@ const Ventas: React.FC = () => {
                         <div style={{ display: 'flex', gap: '0.9rem' }}>
                             <button onClick={handleSubmit} className="btn-login" style={{ flex: 1, padding: '0.45rem', fontSize: '0.72rem' }}>REGISTRAR VENTA</button>
                             <button onClick={() => { setShowModal(false); setSelectedProducts([]); }} style={{ flex: 1, padding: '0.45rem', background: 'transparent', border: '1px solid #1e293b', borderRadius: '0.45rem', color: '#94a3b8', cursor: 'pointer', fontSize: '0.72rem' }}>CANCELAR</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de ajuste de precio */}
+            {ajusteData && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.95)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 1001
+                }}>
+                    <div style={{
+                        background: '#0a0a0a',
+                        border: '1px solid #00ff88',
+                        borderRadius: '1rem',
+                        padding: '2rem',
+                        width: '90%',
+                        maxWidth: '400px'
+                    }}>
+                        <h3 style={{ color: '#00ff88', marginBottom: '1rem' }}>✏️ AJUSTAR PRECIO</h3>
+                        <div style={{ marginBottom: '1rem' }}>
+                            <label style={{ fontSize: '0.7rem', color: '#64748b' }}>PRECIO ORIGINAL</label>
+                            <div style={{ fontSize: '1rem', color: '#ffaa00' }}>
+                                ${ajusteData.precio_original.toLocaleString()}
+                            </div>
+                        </div>
+                        <div style={{ marginBottom: '1rem' }}>
+                            <label style={{ fontSize: '0.7rem', color: '#64748b' }}>NUEVO PRECIO</label>
+                            <input
+                                type="number"
+                                value={ajusteData.precio_nuevo}
+                                onChange={(e) => setAjusteData({ ...ajusteData, precio_nuevo: parseFloat(e.target.value) })}
+                                style={{ width: '100%', padding: '0.5rem', background: '#1a1a1a', border: '1px solid #1e293b', borderRadius: '0.5rem', color: 'white' }}
+                            />
+                        </div>
+                        <div style={{ display: 'flex', gap: '1rem' }}>
+                            <button
+                                onClick={() => {
+                                    const index = selectedProducts.findIndex(p => p.producto_id === ajusteData.producto_id);
+                                    if (index !== -1) {
+                                        ajustarPrecio(index, ajusteData.precio_nuevo);
+                                    }
+                                }}
+                                className="btn-login"
+                                style={{ flex: 1 }}
+                            >
+                                APLICAR
+                            </button>
+                            <button
+                                onClick={() => setAjusteData(null)}
+                                style={{ flex: 1, padding: '0.5rem', background: 'transparent', border: '1px solid #1e293b', borderRadius: '0.5rem', color: '#94a3b8', cursor: 'pointer' }}
+                            >
+                                CANCELAR
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -581,7 +686,14 @@ const Ventas: React.FC = () => {
                                 {selectedVenta.detalles && selectedVenta.detalles.length > 0 ? (
                                     selectedVenta.detalles.map((detalle, idx) => (
                                         <tr key={idx} style={{ borderBottom: '1px solid #1a1a1a' }}>
-                                            <td style={{ padding: '0.45rem', fontSize: '0.7rem' }}>{detalle.nombre_producto}</td>
+                                            <td style={{ padding: '0.45rem', fontSize: '0.7rem' }}>
+                                                {detalle.nombre_producto}
+                                                {detalle.precio_original && detalle.precio_original !== detalle.precio_unit && (
+                                                    <div style={{ fontSize: '0.6rem', color: '#ffaa00' }}>
+                                                        (Ajustado de ${detalle.precio_original.toLocaleString()})
+                                                    </div>
+                                                )}
+                                            </td>
                                             <td style={{ padding: '0.45rem', textAlign: 'center', fontSize: '0.7rem' }}>{detalle.cantidad}</td>
                                             <td style={{ padding: '0.45rem', textAlign: 'right', fontSize: '0.7rem' }}>${detalle.precio_unit.toLocaleString()}</td>
                                             <td style={{ padding: '0.45rem', textAlign: 'right', fontSize: '0.7rem', color: '#00ff88' }}>${detalle.subtotal.toLocaleString()}</td>
