@@ -1,11 +1,8 @@
 import axios from 'axios';
 
-// Usar variable de entorno para la URL base
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
-
 const apiClient = axios.create({
-    baseURL: API_URL,
-    timeout: 30000,
+    baseURL: 'http://localhost:8000/api/v1',  // Cambia a 8000 si es necesario
+    timeout: 30000,  // Aumenta el timeout
     headers: {
         'Content-Type': 'application/json',
     },
@@ -18,6 +15,7 @@ apiClient.interceptors.request.use(
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
+        // Para FormData, no establecer Content-Type
         if (config.data instanceof FormData) {
             delete config.headers['Content-Type'];
         }
@@ -36,6 +34,9 @@ apiClient.interceptors.response.use(
             window.location.href = '/login';
         } else if (error.response?.status === 403) {
             console.error('No tiene permisos para esta acción');
+            alert('No tiene permisos suficientes');
+        } else if (error.response?.status === 404) {
+            console.error('Endpoint no encontrado:', error.config?.url);
         }
         return Promise.reject(error);
     }
