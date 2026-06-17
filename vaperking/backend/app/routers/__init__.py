@@ -1,2 +1,3 @@
-﻿# app/routers/__init__.py
-from app.routers import auth, ventas, productos, inventario, cierres, sedes, reportes, usuarios, gastos, productos_danados, observaciones, sueldos_vendedores
+from app.routers import auth, usuarios, permisos, ventas, productos, sedes
+from app.routers import reportes, inventario, gastos, cierres, observaciones
+from app.routers import productos_danados, sueldos_vendedores

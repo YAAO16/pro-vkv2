@@ -1,24 +1,14 @@
 from pydantic_settings import BaseSettings
-from typing import List
-import json
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
 
 class Settings(BaseSettings):
-    DATABASE_URL: str
-    SECRET_KEY: str
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:5173"]
-    ENVIRONMENT: str = "development"
-    DEBUG: bool = True
-
-    class Config:
-        env_file = ".env"
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if isinstance(self.ALLOWED_ORIGINS, str):
-            self.ALLOWED_ORIGINS = json.loads(self.ALLOWED_ORIGINS)
-
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "mysql+pymysql://root:@localhost/vaperking_db")
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "mi_clave_secreta_super_segura_123456")
+    ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"  # ← False por defecto
 
 settings = Settings()

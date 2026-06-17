@@ -1,221 +1,142 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import Optional
-from app.database import get_db
-from app.dependencies import require_roles
-from app.models.usuario import Usuario  # Solo Usuario, no RolUsuario
-from app.models.sede import Sede
-from app.utils.security import hash_password
+from typing import List
 from pydantic import BaseModel
-from datetime import datetime
+from app.database import get_db
+from app.dependencies import get_current_user, verify_admin
+from app.models import Usuario, Permiso
+from app.core.security import get_password_hash
 
 router = APIRouter()
 
-# Schemas
-class UsuarioCreate(BaseModel):
+class AsignarPermisosRequest(BaseModel):
+    permisos_ids: List[int]
+
+class CrearUsuarioRequest(BaseModel):
     username: str
     nombre_completo: str
     password: str
-    rol: str  # "admin" o "vendedor"
-    sede_id: Optional[int] = None
-
-
-class UsuarioUpdate(BaseModel):
-    nombre_completo: Optional[str] = None
-    password: Optional[str] = None
-    rol: Optional[str] = None
-    sede_id: Optional[int] = None
-    activo: Optional[bool] = None
-
-
-class UsuarioResponse(BaseModel):
-    id: int
-    username: str
-    nombre_completo: str
     rol: str
-    sede_id: Optional[int]
-    nombre_sede: Optional[str]
-    activo: bool
-    created_at: datetime
+    sede_id: int = None
 
-    class Config:
-        from_attributes = True
+class EditarUsuarioRequest(BaseModel):
+    nombre_completo: str = None
+    rol: str = None
+    sede_id: int = None
+    activo: bool = None
+    password: str = None
 
-
-@router.get("/", response_model=list[UsuarioResponse])
-def listar_usuarios(
-    rol: Optional[str] = Query(None),
-    activo: Optional[bool] = Query(True),
+@router.get("/")
+def get_usuarios(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles("admin"))
+    current_user: Usuario = Depends(verify_admin)
 ):
-    """Lista todos los usuarios (solo admin)"""
-    query = db.query(Usuario)
-    
-    if rol:
-        query = query.filter(Usuario.rol == rol)
-    if activo is not None:
-        query = query.filter(Usuario.activo == activo)
-    
-    usuarios = query.order_by(Usuario.created_at.desc()).all()
-    
-    response = []
-    for u in usuarios:
-        sede = db.query(Sede).filter(Sede.id == u.sede_id).first()
-        response.append(UsuarioResponse(
-            id=u.id,
-            username=u.username,
-            nombre_completo=u.nombre_completo,
-            rol=u.rol,
-            sede_id=u.sede_id,
-            nombre_sede=sede.nombre if sede else None,
-            activo=u.activo,
-            created_at=u.created_at
-        ))
-    
-    return response
+    usuarios = db.query(Usuario).all()
+    return usuarios
 
-
-@router.get("/{usuario_id}", response_model=UsuarioResponse)
-def obtener_usuario(
+@router.get("/{usuario_id}")
+def get_usuario(
     usuario_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles("admin"))
+    current_user: Usuario = Depends(verify_admin)
 ):
-    """Obtiene un usuario por ID (solo admin)"""
     usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
-    sede = db.query(Sede).filter(Sede.id == usuario.sede_id).first()
-    
-    return UsuarioResponse(
-        id=usuario.id,
-        username=usuario.username,
-        nombre_completo=usuario.nombre_completo,
-        rol=usuario.rol.value,
-        sede_id=usuario.sede_id,
-        nombre_sede=sede.nombre if sede else None,
-        activo=usuario.activo,
-        created_at=usuario.created_at
-    )
+    return usuario
 
-
-@router.post("/", response_model=UsuarioResponse)
+@router.post("/")
 def crear_usuario(
-    usuario_data: UsuarioCreate,
+    request: CrearUsuarioRequest,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles("admin"))
+    current_user: Usuario = Depends(verify_admin)
 ):
-    """Crea un nuevo usuario (solo admin)"""
-    # Verificar si ya existe el username
-    existe = db.query(Usuario).filter(Usuario.username == usuario_data.username).first()
-    if existe:
-        raise HTTPException(status_code=400, detail="Ya existe un usuario con este username")
-    
-    # Verificar que el rol sea válido
-    if usuario_data.rol not in ["admin", "vendedor"]:
-        raise HTTPException(status_code=400, detail="Rol inválido. Debe ser 'admin' o 'vendedor'")
-    
-    # Si es vendedor, verificar que tenga sede asignada
-    if usuario_data.rol == "vendedor" and not usuario_data.sede_id:
-        raise HTTPException(status_code=400, detail="Un vendedor debe tener una sede asignada")
-    
-    # Verificar que la sede exista
-    if usuario_data.sede_id:
-        sede = db.query(Sede).filter(Sede.id == usuario_data.sede_id).first()
-        if not sede:
-            raise HTTPException(status_code=404, detail="Sede no encontrada")
+    # Verificar si el username ya existe
+    existing = db.query(Usuario).filter(Usuario.username == request.username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="El nombre de usuario ya existe")
     
     nuevo_usuario = Usuario(
-        username=usuario_data.username,
-        nombre_completo=usuario_data.nombre_completo,
-        password_hash=hash_password(usuario_data.password),
-        rol=usuario_data.rol,
-        sede_id=usuario_data.sede_id
+        username=request.username,
+        nombre_completo=request.nombre_completo,
+        password_hash=get_password_hash(request.password),
+        rol=request.rol,
+        sede_id=request.sede_id,
+        activo=True
     )
-    
     db.add(nuevo_usuario)
     db.commit()
     db.refresh(nuevo_usuario)
     
-    sede = db.query(Sede).filter(Sede.id == nuevo_usuario.sede_id).first()
-    
-    return UsuarioResponse(
-        id=nuevo_usuario.id,
-        username=nuevo_usuario.username,
-        nombre_completo=nuevo_usuario.nombre_completo,
-        rol=nuevo_usuario.rol,
-        sede_id=nuevo_usuario.sede_id,
-        nombre_sede=sede.nombre if sede else None,
-        activo=nuevo_usuario.activo,
-        created_at=nuevo_usuario.created_at
-    )
+    return nuevo_usuario
 
-
-@router.put("/{usuario_id}", response_model=UsuarioResponse)
-def actualizar_usuario(
+@router.put("/{usuario_id}")
+def editar_usuario(
     usuario_id: int,
-    usuario_data: UsuarioUpdate,
+    request: EditarUsuarioRequest,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles("admin"))
+    current_user: Usuario = Depends(verify_admin)
 ):
-    """Actualiza un usuario (solo admin)"""
     usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
-    # Actualizar campos
-    if usuario_data.nombre_completo is not None:
-        usuario.nombre_completo = usuario_data.nombre_completo
-    if usuario_data.password:
-        usuario.password_hash = hash_password(usuario_data.password)
-    if usuario_data.rol is not None:
-        if usuario_data.rol not in ["admin", "vendedor"]:
-            raise HTTPException(status_code=400, detail="Rol inválido")
-        usuario.rol = usuario_data.rol
-    if usuario_data.sede_id is not None:
-        if usuario_data.sede_id:
-            sede = db.query(Sede).filter(Sede.id == usuario_data.sede_id).first()
-            if not sede:
-                raise HTTPException(status_code=404, detail="Sede no encontrada")
-        usuario.sede_id = usuario_data.sede_id
-    if usuario_data.activo is not None:
-        usuario.activo = usuario_data.activo
+    if request.nombre_completo is not None:
+        usuario.nombre_completo = request.nombre_completo
+    if request.rol is not None:
+        usuario.rol = request.rol
+    if request.sede_id is not None:
+        usuario.sede_id = request.sede_id
+    if request.activo is not None:
+        usuario.activo = request.activo
+    if request.password:
+        usuario.password_hash = get_password_hash(request.password)
     
     db.commit()
     db.refresh(usuario)
     
-    sede = db.query(Sede).filter(Sede.id == usuario.sede_id).first()
-    
-    return UsuarioResponse(
-        id=usuario.id,
-        username=usuario.username,
-        nombre_completo=usuario.nombre_completo,
-        rol=usuario.rol,
-        sede_id=usuario.sede_id,
-        nombre_sede=sede.nombre if sede else None,
-        activo=usuario.activo,
-        created_at=usuario.created_at
-    )
-
+    return usuario
 
 @router.delete("/{usuario_id}")
 def eliminar_usuario(
     usuario_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles("admin"))
+    current_user: Usuario = Depends(verify_admin)
 ):
-    """Elimina (desactiva) un usuario (solo admin)"""
     usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
-    # No permitir eliminar el propio usuario
-    if usuario.id == current_user.id:
-        raise HTTPException(status_code=400, detail="No puedes desactivar tu propio usuario")
-    
+    # Desactivar en lugar de eliminar
     usuario.activo = False
     db.commit()
     
     return {"message": "Usuario desactivado correctamente"}
+
+@router.get("/{usuario_id}/permisos")
+def get_usuario_permisos(
+    usuario_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(verify_admin)
+):
+    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return usuario.permisos
+
+@router.post("/{usuario_id}/permisos")
+def asignar_permisos(
+    usuario_id: int,
+    request: AsignarPermisosRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(verify_admin)
+):
+    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    permisos = db.query(Permiso).filter(Permiso.id.in_(request.permisos_ids)).all()
+    usuario.permisos = permisos
+    db.commit()
+    
+    return {"message": "Permisos asignados correctamente"}

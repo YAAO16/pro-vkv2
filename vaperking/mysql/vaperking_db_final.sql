@@ -73,14 +73,16 @@ CREATE TABLE productos (
 );
 
 -- ============================================
--- TABLA: ventas
+-- TABLA: ventas (MODIFICADA PARA PAGO MIXTO)
 -- ============================================
 CREATE TABLE ventas (
     id INT PRIMARY KEY AUTO_INCREMENT,
     sede_id INT NOT NULL,
     usuario_id INT NOT NULL,
     total DECIMAL(12,2) NOT NULL,
-    metodo_pago ENUM('efectivo', 'transferencia') NOT NULL,
+    metodo_pago ENUM('efectivo', 'transferencia', 'mixto') NOT NULL,
+    efectivo DECIMAL(12,2) NULL,
+    transferencia DECIMAL(12,2) NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     notas TEXT,
     anulada BOOLEAN DEFAULT FALSE,
@@ -102,6 +104,7 @@ CREATE TABLE venta_detalle (
     producto_id INT NOT NULL,
     cantidad INT NOT NULL,
     precio_unit DECIMAL(12,2) NOT NULL,
+    precio_original DECIMAL(12,2) NULL,
     subtotal DECIMAL(12,2) NOT NULL,
     FOREIGN KEY (venta_id) REFERENCES ventas(id) ON DELETE CASCADE,
     FOREIGN KEY (producto_id) REFERENCES productos(id),
@@ -251,8 +254,10 @@ CREATE TABLE sueldos_vendedores (
     INDEX idx_fecha (mes, ano)
 );
 
--- Tabla de gastos
-CREATE TABLE IF NOT EXISTS gastos (
+-- ============================================
+-- TABLA: gastos
+-- ============================================
+CREATE TABLE gastos (
     id INT PRIMARY KEY AUTO_INCREMENT,
     fecha DATE NOT NULL,
     motivo VARCHAR(255) NOT NULL,
@@ -267,6 +272,31 @@ CREATE TABLE IF NOT EXISTS gastos (
     INDEX idx_fecha (fecha),
     INDEX idx_sede (sede_id)
 );
+
+-- ============================================
+-- TABLA: permisos
+-- ============================================
+CREATE TABLE permisos (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    nombre VARCHAR(100) NOT NULL UNIQUE,
+    descripcion VARCHAR(255),
+    modulo VARCHAR(50),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- TABLA: usuario_permisos
+-- ============================================
+CREATE TABLE usuario_permisos (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    usuario_id INT NOT NULL,
+    permiso_id INT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+    FOREIGN KEY (permiso_id) REFERENCES permisos(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_usuario_permiso (usuario_id, permiso_id)
+);
+
 -- ============================================
 -- DATOS DE PRUEBA
 -- ============================================
@@ -289,3 +319,173 @@ INSERT INTO usuarios (id, username, nombre_completo, password_hash, rol, sede_id
 (3, 'mocoavp', 'Vendedor Mocoa', '$2b$12$cN3R/PxYh8oajBryexfzYuwUmacwGMW/zARXtx0MU/e68NZVPe7Fu', 'vendedor', 2, TRUE),
 (4, 'puertoasisp', 'Vendedor Puerto Asís', '$2b$12$QzJhH0vSLhxoAcnNwb4r2.El9rw0ch9JW2B7izPIr0oqxChJKF68e', 'vendedor', 3, TRUE);
 
+-- 3. INSERTAR CATEGORÍAS
+INSERT INTO categorias (id, nombre, descripcion) VALUES
+(1, 'Vapes', 'Dispositivos de vapeo'),
+(2, 'E-líquidos', 'Líquidos para vapeo'),
+(3, 'Resistencias', 'Resistencias y coils'),
+(4, 'Accesorios', 'Accesorios para vapeo');
+
+-- 4. INSERTAR PRODUCTOS
+INSERT INTO productos (id, sku, nombre, descripcion, categoria_id, precio_costo, precio_venta, stock_minimo, activo) VALUES
+(1, 'VAP-001', 'Vaporesso XROS 3', 'Pod system de última generación', 1, 85000, 129900, 5, TRUE),
+(2, 'VAP-002', 'OXVA Xlim Pro', 'Pod system con pantalla', 1, 95000, 139900, 5, TRUE),
+(3, 'VAP-003', 'Smok Nord 5', 'Kit de vapeo avanzado', 1, 120000, 169900, 5, TRUE),
+(4, 'ELQ-001', 'Nasty Juice Mango', 'E-líquido sabor mango 60ml', 2, 25000, 45000, 10, TRUE),
+(5, 'ELQ-002', 'Ruthless Grape Drank', 'E-líquido sabor uva 60ml', 2, 28000, 55000, 10, TRUE),
+(6, 'RES-001', 'Coil Vaporesso 0.8', 'Resistencia para XROS', 3, 15000, 35000, 15, TRUE),
+(7, 'ACC-001', 'Batería 18650', 'Batería recargable', 4, 12000, 25000, 15, TRUE);
+
+-- 5. INSERTAR INVENTARIO INICIAL
+INSERT INTO inventario_diario (sede_id, producto_id, fecha, stock_inicio, entradas, salidas, stock_final)
+SELECT 1, id, CURDATE(), 20, 0, 0, 20 FROM productos WHERE activo = true;
+
+INSERT INTO inventario_diario (sede_id, producto_id, fecha, stock_inicio, entradas, salidas, stock_final)
+SELECT 2, id, CURDATE(), 20, 0, 0, 20 FROM productos WHERE activo = true;
+
+INSERT INTO inventario_diario (sede_id, producto_id, fecha, stock_inicio, entradas, salidas, stock_final)
+SELECT 3, id, CURDATE(), 20, 0, 0, 20 FROM productos WHERE activo = true;
+
+-- 6. INSERTAR PERMISOS
+INSERT INTO permisos (nombre, descripcion, modulo) VALUES
+-- Ventas
+('ventas_crear', 'Permite crear ventas', 'ventas'),
+('ventas_ver', 'Permite ver ventas', 'ventas'),
+('ventas_anular', 'Permite anular ventas', 'ventas'),
+('ventas_ajustar_precio', 'Permite ajustar precios en ventas', 'ventas'),
+
+-- Inventario
+('inventario_ver', 'Permite ver inventario', 'inventario'),
+('inventario_ajustar', 'Permite ajustar stock', 'inventario'),
+
+-- Productos
+('productos_ver', 'Permite ver productos', 'productos'),
+('productos_crear', 'Permite crear productos', 'productos'),
+('productos_editar', 'Permite editar productos', 'productos'),
+('productos_eliminar', 'Permite eliminar productos', 'productos'),
+
+-- Gastos
+('gastos_crear', 'Permite crear gastos', 'gastos'),
+('gastos_ver', 'Permite ver gastos', 'gastos'),
+('gastos_editar', 'Permite editar gastos', 'gastos'),
+('gastos_eliminar', 'Permite eliminar gastos', 'gastos'),
+
+-- Cierres
+('cierres_ver', 'Permite ver cierres', 'cierres'),
+('cierres_crear', 'Permite crear cierres', 'cierres'),
+
+-- Observaciones
+('observaciones_crear', 'Permite crear observaciones', 'observaciones'),
+('observaciones_ver', 'Permite ver observaciones', 'observaciones'),
+
+-- Reportes
+('reportes_ver', 'Permite ver reportes', 'reportes'),
+('reportes_exportar', 'Permite exportar reportes', 'reportes'),
+
+-- Dashboard
+('dashboard_ver', 'Permite ver dashboard', 'dashboard'),
+
+-- Sedes
+('sedes_ver', 'Permite ver sedes', 'sedes'),
+('sedes_crear', 'Permite crear sedes', 'sedes'),
+('sedes_editar', 'Permite editar sedes', 'sedes'),
+('sedes_eliminar', 'Permite eliminar sedes', 'sedes'),
+
+-- Usuarios
+('usuarios_ver', 'Permite ver usuarios', 'usuarios'),
+('usuarios_crear', 'Permite crear usuarios', 'usuarios'),
+('usuarios_editar', 'Permite editar usuarios', 'usuarios'),
+('usuarios_eliminar', 'Permite eliminar usuarios', 'usuarios'),
+
+-- Sueldos
+('sueldos_ver', 'Permite ver sueldos', 'sueldos'),
+('sueldos_crear', 'Permite crear sueldos', 'sueldos'),
+('sueldos_editar', 'Permite editar sueldos', 'sueldos'),
+('sueldos_eliminar', 'Permite eliminar sueldos', 'sueldos'),
+
+-- Historial
+('historial_ver', 'Permite ver historial de ajustes', 'historial'),
+
+-- Productos Dañados
+('danados_crear', 'Permite registrar productos dañados', 'danados'),
+('danados_ver', 'Permite ver productos dañados', 'danados'),
+('danados_eliminar', 'Permite eliminar productos dañados', 'danados');
+
+-- 7. ASIGNAR PERMISOS AL ADMINISTRADOR (usuario_id = 1)
+INSERT INTO usuario_permisos (usuario_id, permiso_id)
+SELECT 1, id FROM permisos
+ON DUPLICATE KEY UPDATE permiso_id = permiso_id;
+
+-- 8. ASIGNAR PERMISOS BÁSICOS A VENDEDORES
+INSERT INTO usuario_permisos (usuario_id, permiso_id) 
+SELECT u.id, p.id
+FROM usuarios u
+CROSS JOIN permisos p
+WHERE u.rol = 'vendedor' 
+AND p.nombre IN (
+    'ventas_crear',
+    'ventas_ver',
+    'ventas_ajustar_precio',
+    'inventario_ver',
+    'productos_ver',
+    'gastos_crear',
+    'gastos_ver',
+    'cierres_ver',
+    'cierres_crear',
+    'observaciones_crear',
+    'observaciones_ver',
+    'reportes_ver',
+    'dashboard_ver'
+)
+ON DUPLICATE KEY UPDATE permiso_id = permiso_id;
+
+-- 9. INSERTAR REGISTROS DE PRUEBA - GASTOS (con fechas válidas)
+INSERT INTO gastos (fecha, motivo, valor, descripcion, sede_id, usuario_id) VALUES
+(CURDATE(), 'Compra de mercancía', 500000, 'Compra de nuevos productos para inventario', 1, 2),
+(DATE_SUB(CURDATE(), INTERVAL 1 DAY), 'Pago de servicios públicos', 150000, 'Luz y agua del local', 1, 2),
+(DATE_SUB(CURDATE(), INTERVAL 2 DAY), 'Mantenimiento de equipos', 200000, 'Reparación de equipos de vapeo', 2, 3),
+(DATE_SUB(CURDATE(), INTERVAL 3 DAY), 'Compra de empaques', 80000, 'Bolsas y cajas para entregas', 3, 4),
+(DATE_SUB(CURDATE(), INTERVAL 5 DAY), 'Publicidad y marketing', 300000, 'Redes sociales y volantes', 1, 2),
+(DATE_SUB(CURDATE(), INTERVAL 7 DAY), 'Transporte', 120000, 'Envío de mercancía', 2, 3),
+(DATE_SUB(CURDATE(), INTERVAL 10 DAY), 'Papelería', 45000, 'Facturas, esferos, etc.', 3, 4),
+(DATE_SUB(CURDATE(), INTERVAL 15 DAY), 'Compra de mercancía', 350000, 'Reposición de stock', 1, 2),
+(DATE_SUB(CURDATE(), INTERVAL 20 DAY), 'Mantenimiento local', 180000, 'Arreglos en el local', 2, 3),
+(DATE_SUB(CURDATE(), INTERVAL 30 DAY), 'Suscripciones software', 120000, 'Mensualidad sistema de ventas', 1, 2);
+
+-- 10. INSERTAR REGISTROS DE PRUEBA - VENTAS MIXTAS
+-- Venta 1: Mixta (efectivo + transferencia)
+INSERT INTO ventas (sede_id, usuario_id, total, metodo_pago, efectivo, transferencia, created_at, notas) VALUES
+(1, 2, 129900, 'mixto', 80000, 49900, NOW(), 'Venta mixta - Vaporesso XROS 3');
+
+INSERT INTO venta_detalle (venta_id, producto_id, cantidad, precio_unit, precio_original, subtotal) VALUES
+(LAST_INSERT_ID(), 1, 1, 129900, NULL, 129900);
+
+-- Actualizar inventario para venta 1
+INSERT INTO inventario_diario (sede_id, producto_id, fecha, stock_inicio, entradas, salidas, stock_final)
+SELECT 1, 1, CURDATE(), 
+       (SELECT stock_final FROM inventario_diario WHERE sede_id = 1 AND producto_id = 1 ORDER BY fecha DESC LIMIT 1),
+       0, 1, 
+       (SELECT stock_final FROM inventario_diario WHERE sede_id = 1 AND producto_id = 1 ORDER BY fecha DESC LIMIT 1) - 1
+ON DUPLICATE KEY UPDATE salidas = salidas + 1, stock_final = stock_final - 1;
+
+-- Venta 2: Mixta (efectivo + transferencia) con dos productos
+INSERT INTO ventas (sede_id, usuario_id, total, metodo_pago, efectivo, transferencia, created_at, notas) VALUES
+(2, 3, 194900, 'mixto', 100000, 94900, NOW(), 'Venta mixta - OXVA Xlim Pro + E-líquido');
+
+INSERT INTO venta_detalle (venta_id, producto_id, cantidad, precio_unit, precio_original, subtotal) VALUES
+(LAST_INSERT_ID(), 2, 1, 139900, NULL, 139900),
+(LAST_INSERT_ID(), 4, 1, 55000, NULL, 55000);
+
+-- Venta 3: Solo efectivo con ajuste de precio
+INSERT INTO ventas (sede_id, usuario_id, total, metodo_pago, efectivo, transferencia, created_at, notas) VALUES
+(3, 4, 105000, 'efectivo', 105000, NULL, NOW(), 'Venta con descuento especial');
+
+INSERT INTO venta_detalle (venta_id, producto_id, cantidad, precio_unit, precio_original, subtotal) VALUES
+(LAST_INSERT_ID(), 3, 1, 105000, 169900, 105000);
+
+-- Venta 4: Solo transferencia
+INSERT INTO ventas (sede_id, usuario_id, total, metodo_pago, efectivo, transferencia, created_at, notas) VALUES
+(1, 2, 80000, 'transferencia', NULL, 80000, NOW(), 'Venta por transferencia - Resistencias');
+
+INSERT INTO venta_detalle (venta_id, producto_id, cantidad, precio_unit, precio_original, subtotal) VALUES
+(LAST_INSERT_ID(), 6, 2, 40000, 35000, 80000);

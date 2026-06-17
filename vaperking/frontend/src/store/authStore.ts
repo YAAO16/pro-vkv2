@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 export interface Usuario {
     id: number;
@@ -7,34 +6,36 @@ export interface Usuario {
     nombre_completo: string;
     rol: string;
     sede_id: number | null;
-    activo: boolean;
 }
 
 interface AuthState {
-    token: string | null;
     usuario: Usuario | null;
     isAuthenticated: boolean;
+    token: string | null;
     login: (token: string, usuario: Usuario) => void;
     logout: () => void;
 }
 
-export const useAuthStore = create<AuthState>()(
-    persist(
-        (set) => ({
-            token: null,
-            usuario: null,
-            isAuthenticated: false,
-            login: (token, usuario) => {
-                localStorage.setItem('token', token);
-                set({ token, usuario, isAuthenticated: true });
-            },
-            logout: () => {
-                localStorage.removeItem('token');
-                set({ token: null, usuario: null, isAuthenticated: false });
-            },
-        }),
-        {
-            name: 'vaperking-auth',
-        }
-    )
-);
+export const useAuthStore = create<AuthState>((set) => ({
+    usuario: null,
+    isAuthenticated: false,
+    token: null,
+    login: (token: string, usuario: Usuario) => {
+        localStorage.setItem('access_token', token);
+        localStorage.setItem('user', JSON.stringify(usuario));
+        set({ 
+            usuario, 
+            token, 
+            isAuthenticated: true 
+        });
+    },
+    logout: () => {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('user');
+        set({ 
+            usuario: null, 
+            token: null, 
+            isAuthenticated: false 
+        });
+    },
+}));

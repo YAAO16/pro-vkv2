@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import apiClient from '../../api/axiosClient';
 import { useAuthStore } from '../../store/authStore';
 import type { Usuario } from '../../store/authStore';
-import '../../App.css';
 
 const Login: React.FC = () => {
     const navigate = useNavigate();
@@ -12,6 +11,8 @@ const Login: React.FC = () => {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [isFocused, setIsFocused] = useState({ username: false, password: false });
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -31,102 +32,83 @@ const Login: React.FC = () => {
     };
 
     return (
-        <div className="login-container">
-            <div className="vape-particles">
-                {[...Array(8)].map((_, i) => (
-                    <div
-                        key={i}
-                        className="particle"
-                        style={{
-                            width: Math.random() * 150 + 40 + 'px',
-                            height: Math.random() * 150 + 40 + 'px',
-                            left: Math.random() * 100 + '%',
-                            top: Math.random() * 100 + '%',
-                            animationDelay: Math.random() * 10 + 's',
-                            animationDuration: Math.random() * 10 + 10 + 's'
-                        }}
-                    />
-                ))}
+        <div className="login-page">
+            {/* Fondo con gradiente */}
+            <div className="login-bg">
+                <div className="login-bg-glow" />
             </div>
 
             <div className="login-card">
-                <div className="logo-container">
-                    <div className="logo-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5">
-                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" fill="none"/>
-                            <path d="M12 2v20" stroke="currentColor"/>
-                            <circle cx="12" cy="12" r="2" fill="currentColor"/>
-                        </svg>
-                    </div>
-                    <h1 className="logo-text">VAPERKING</h1>
-                    <p className="logo-subtitle">PREMIUM VAPE STORE</p>
+                {/* Logo */}
+                <div className="login-logo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                        <path d="M2 17l10 5 10-5" />
+                        <path d="M2 12l10 5 10-5" />
+                        <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+                    </svg>
+                    <span>VAPERKING</span>
                 </div>
+                <p className="login-subtitle">Sistema de gestión</p>
 
-                {error && (
-                    <div style={{ 
-                        background: 'rgba(0, 255, 136, 0.15)', 
-                        border: '1px solid rgba(0, 255, 136, 0.3)',
-                        color: '#00ff88', 
-                        padding: '0.6rem', 
-                        borderRadius: '0.65rem', 
-                        marginBottom: '1.25rem',
-                        fontSize: '0.75rem',
-                        textAlign: 'center'
-                    }}>
-                        {error}
-                    </div>
-                )}
+                <div className="login-divider" />
 
+                {/* Formulario */}
                 <form className="login-form" onSubmit={handleSubmit}>
-                    <div className="input-group">
-                        <label className="input-label">USUARIO</label>
-                        <div className="input-wrapper">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="1.5"/>
-                                <circle cx="12" cy="7" r="4" stroke="currentColor" strokeWidth="1.5"/>
-                            </svg>
+                    <div className="login-field">
+                        <label>Usuario</label>
+                        <div className={`login-input ${isFocused.username ? 'focused' : ''}`}>
+                            <span className="login-icon">👤</span>
                             <input
                                 type="text"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
-                                className="input-field"
+                                onFocus={() => setIsFocused({ ...isFocused, username: true })}
+                                onBlur={() => setIsFocused({ ...isFocused, username: false })}
                                 placeholder="Ingresa tu usuario"
                                 required
                             />
                         </div>
                     </div>
 
-                    <div className="input-group">
-                        <label className="input-label">CONTRASEÑA</label>
-                        <div className="input-wrapper">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" stroke="currentColor" strokeWidth="1.5"/>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="currentColor" strokeWidth="1.5"/>
-                            </svg>
+                    <div className="login-field">
+                        <label>Contraseña</label>
+                        <div className={`login-input ${isFocused.password ? 'focused' : ''}`}>
+                            <span className="login-icon">🔒</span>
                             <input
-                                type="password"
+                                type={showPassword ? 'text' : 'password'}
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="input-field"
+                                onFocus={() => setIsFocused({ ...isFocused, password: true })}
+                                onBlur={() => setIsFocused({ ...isFocused, password: false })}
                                 placeholder="Ingresa tu contraseña"
                                 required
                             />
+                            <button
+                                type="button"
+                                className="login-toggle"
+                                onClick={() => setShowPassword(!showPassword)}
+                            >
+                                {showPassword ? '🙈' : '👁️'}
+                            </button>
                         </div>
                     </div>
 
-                    <button type="submit" disabled={loading} className="btn-login">
+                    {error && <div className="login-error">{error}</div>}
+
+                    <button type="submit" className="login-button" disabled={loading}>
                         {loading ? 'ACCEDIENDO...' : 'INGRESAR'}
                     </button>
                 </form>
 
-                <div className="test-credentials">
-                    <p>🔐 ACCESO DE PRUEBA</p>
-                    <div>
-                        <span className="credential-badge">
-                            <span>Admin:</span> Eduar_admin / ******
+                <div className="login-footer">
+                    <span className="login-cred-label">🔐 Acceso de prueba</span>
+                    <div className="login-creds">
+                        <span className="login-cred">
+                            <strong>Admin:</strong> Eduar_admin
                         </span>
-                        <span className="credential-badge">
-                            <span>Vendedor:</span> villavp / ******
+                        <span className="login-cred">
+                            <strong>Vendedor:</strong> villavp
                         </span>
                     </div>
                 </div>

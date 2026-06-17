@@ -1,14 +1,13 @@
-from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey, Enum, Boolean, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, Boolean, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from app.database import Base
+from datetime import datetime
 import enum
 
-
 class MetodoPago(str, enum.Enum):
-    efectivo = "efectivo"
-    transferencia = "transferencia"
-
+    EFECTIVO = "efectivo"
+    TRANSFERENCIA = "transferencia"
+    MIXTO = "mixto"
 
 class Venta(Base):
     __tablename__ = "ventas"
@@ -18,7 +17,9 @@ class Venta(Base):
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     total = Column(Float, nullable=False)
     metodo_pago = Column(Enum(MetodoPago), nullable=False)
-    created_at = Column(DateTime, default=func.now())
+    efectivo = Column(Float, nullable=True)
+    transferencia = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
     notas = Column(Text, nullable=True)
     anulada = Column(Boolean, default=False)
     anulada_por = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
@@ -27,20 +28,19 @@ class Venta(Base):
     # Relaciones
     sede = relationship("Sede", back_populates="ventas")
     usuario = relationship("Usuario", foreign_keys=[usuario_id], back_populates="ventas")
-    anulada_por_rel = relationship("Usuario", foreign_keys=[anulada_por], back_populates="ventas_anuladas")
     detalles = relationship("VentaDetalle", back_populates="venta", cascade="all, delete-orphan")
-
 
 class VentaDetalle(Base):
     __tablename__ = "venta_detalle"
     
     id = Column(Integer, primary_key=True, index=True)
-    venta_id = Column(Integer, ForeignKey("ventas.id"), nullable=False)
+    venta_id = Column(Integer, ForeignKey("ventas.id", ondelete="CASCADE"), nullable=False)
     producto_id = Column(Integer, ForeignKey("productos.id"), nullable=False)
     cantidad = Column(Integer, nullable=False)
     precio_unit = Column(Float, nullable=False)
+    precio_original = Column(Float, nullable=True)
     subtotal = Column(Float, nullable=False)
     
     # Relaciones
     venta = relationship("Venta", back_populates="detalles")
-    producto = relationship("Producto", back_populates="detalles_venta")
+    producto = relationship("Producto", back_populates="ventas_detalle")

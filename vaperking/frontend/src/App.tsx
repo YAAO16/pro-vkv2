@@ -1,31 +1,20 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { PermisosProvider } from './context/PermisosContext';
 import Login from './pages/Login/Login';
 import Dashboard from './pages/Dashboard/Dashboard';
-import { useAuthStore } from './store/authStore';
 import './App.css';
-
-const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const { isAuthenticated } = useAuthStore();
-    return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
-};
 
 function App() {
     return (
-        <Router>
-            <Routes>
-                <Route path="/login" element={<Login />} />
-                <Route
-                    path="/dashboard"
-                    element={
-                        <PrivateRoute>
-                            <Dashboard />
-                        </PrivateRoute>
-                    }
-                />
-                <Route path="/" element={<Navigate to="/dashboard" />} />
-            </Routes>
-        </Router>
+        <PermisosProvider>
+            <BrowserRouter>
+                <Routes>
+                    <Route path="/login" element={<Login />} />
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/" element={<Navigate to="/dashboard" />} />
+                </Routes>
+            </BrowserRouter>
+        </PermisosProvider>
     );
 }
 

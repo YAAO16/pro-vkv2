@@ -1,8 +1,7 @@
-from sqlalchemy import Column, Integer, Float, Date, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, Date, Float, ForeignKey, Text, DateTime
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from app.database import Base
-
+from datetime import datetime
 
 class CierreDiario(Base):
     __tablename__ = "cierres_diarios"
@@ -16,7 +15,7 @@ class CierreDiario(Base):
     diferencia = Column(Float, nullable=False)
     cerrado_por = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
     observaciones = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
     
     # Relaciones
     sede = relationship("Sede", back_populates="cierres")

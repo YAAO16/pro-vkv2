@@ -1,15 +1,13 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Enum, DateTime
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from app.database import Base
+from app.models.permiso import usuario_permiso
+from datetime import datetime
 import enum
-
 
 class RolUsuario(str, enum.Enum):
     admin = "admin"
     vendedor = "vendedor"
-    inventario = "inventario"
-
 
 class Usuario(Base):
     __tablename__ = "usuarios"
@@ -21,13 +19,14 @@ class Usuario(Base):
     rol = Column(Enum(RolUsuario), nullable=False)
     sede_id = Column(Integer, ForeignKey("sedes.id"), nullable=True)
     activo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
     
     # Relaciones
     sede = relationship("Sede", back_populates="usuarios")
-    
-    # Especificar foreign_keys para evitar ambigüedad
     ventas = relationship("Venta", foreign_keys="Venta.usuario_id", back_populates="usuario")
-    ventas_anuladas = relationship("Venta", foreign_keys="Venta.anulada_por", back_populates="anulada_por_rel")
+    permisos = relationship("Permiso", secondary=usuario_permiso, back_populates="usuarios")
     cierres = relationship("CierreDiario", foreign_keys="CierreDiario.cerrado_por", back_populates="cerrado_por_rel")
     gastos = relationship("Gasto", back_populates="usuario")
+    observaciones = relationship("Observacion", back_populates="usuario")
+    productos_danados = relationship("ProductoDanado", back_populates="usuario")
+    sueldos = relationship("SueldoVendedor", back_populates="usuario")

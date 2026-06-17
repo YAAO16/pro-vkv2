@@ -1,721 +1,997 @@
 import React, { useState, useEffect } from 'react';
-import useAuth from '../../hooks/useAuth';
-import api from '../../api';
-import '../../App.css';
-
-interface Venta {
-    id: number;
-    sede_id: number;
-    usuario_id: number;
-    nombre_usuario: string;
-    total: number;
-    metodo_pago: string;
-    created_at: string;
-    notas: string;
-    anulada: boolean;
-    sede_nombre?: string;
-    detalles?: VentaDetalle[];
-}
-
-interface VentaDetalle {
-    id: number;
-    producto_id: number;
-    nombre_producto: string;
-    cantidad: number;
-    precio_unit: number;
-    precio_original?: number;
-    subtotal: number;
-}
+import apiClient from '../../api/axiosClient';
+import { usePermisos } from '../../context/PermisosContext';
+import { useAuthStore } from '../../store/authStore';
 
 interface Producto {
     id: number;
-    sku: string;
     nombre: string;
+    sku: string;
     precio_venta: number;
-    stock_actual?: number;
+    stock: number;
 }
 
 interface Sede {
     id: number;
     nombre: string;
-    ciudad: string;
 }
 
-interface Usuario {
-    id: number;
-    username: string;
-    nombre_completo: string;
-    rol: string;
-}
-
-interface AjusteData {
+interface VentaDetalle {
     producto_id: number;
-    precio_original: number;
-    precio_nuevo: number;
+    cantidad: number;
+    precio_unit: number;
+    subtotal: number;
+    producto_nombre?: string;
+}
+
+interface Venta {
+    id: number;
+    sede_id: number;
+    usuario_id: number;
+    total: number;
+    metodo_pago: string;
+    efectivo: number | null;
+    transferencia: number | null;
+    created_at: string;
+    notas: string | null;
+    anulada: boolean;
+    anulada_por: number | null;
+    motivo_anulacion: string | null;
+    usuario?: { nombre_completo: string };
+    sede?: { nombre: string };
+}
+
+interface VentaDetalleFull {
+    id: number;
+    venta_id: number;
+    producto_id: number;
+    cantidad: number;
+    precio_unit: number;
+    precio_original: number | null;
+    subtotal: number;
+    producto?: { nombre: string; sku: string };
 }
 
 const Ventas: React.FC = () => {
-    const { isAdmin, isVendedor, sedeId } = useAuth();
-    const [ventas, setVentas] = useState<Venta[]>([]);
+    const { tienePermiso, isAdmin } = usePermisos();
+    const { usuario } = useAuthStore();
     const [productos, setProductos] = useState<Producto[]>([]);
-    const [usuarios, setUsuarios] = useState<Usuario[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [showModal, setShowModal] = useState(false);
-    const [showDetailModal, setShowDetailModal] = useState(false);
-    const [selectedVenta, setSelectedVenta] = useState<Venta | null>(null);
-    const [selectedProducts, setSelectedProducts] = useState<{ 
-        producto_id: number; 
-        cantidad: number; 
-        precio_unit: number;
-        precio_original?: number;
-    }[]>([]);
-    const [metodoPago, setMetodoPago] = useState('efectivo');
-    const [notas, setNotas] = useState('');
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
     const [sedes, setSedes] = useState<Sede[]>([]);
-    const [filtroSedeId, setFiltroSedeId] = useState<number | null>(null);
-    const [filtroFecha, setFiltroFecha] = useState('');
-    const [filtroFechaInicio, setFiltroFechaInicio] = useState('');
-    const [filtroFechaFin, setFiltroFechaFin] = useState('');
-    const [filtroMetodo, setFiltroMetodo] = useState('');
-    const [filtroUsuario, setFiltroUsuario] = useState<number | null>(null);
-    const [totalVentas, setTotalVentas] = useState(0);
-    const [totalIngresos, setTotalIngresos] = useState(0);
-    
-    // Estado para el ajuste de precio
-    const [ajusteData, setAjusteData] = useState<AjusteData | null>(null);
+    const [ventas, setVentas] = useState<Venta[]>([]);
+    const [showModal, setShowModal] = useState(false);
+    const [showVentasList, setShowVentasList] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
+    const [cantidad, setCantidad] = useState(1);
+    const [carrito, setCarrito] = useState<VentaDetalle[]>([]);
+    const [metodoPago, setMetodoPago] = useState('efectivo');
+    const [efectivo, setEfectivo] = useState<number | null>(null);
+    const [transferencia, setTransferencia] = useState<number | null>(null);
+    const [sedeId, setSedeId] = useState<number>(1);
+    const [notas, setNotas] = useState('');
+
+    // Estados para detalles de venta
+    const [showDetallesModal, setShowDetallesModal] = useState(false);
+    const [ventaSeleccionada, setVentaSeleccionada] = useState<Venta | null>(null);
+    const [detallesVenta, setDetallesVenta] = useState<VentaDetalleFull[]>([]);
+    const [loadingDetalles, setLoadingDetalles] = useState(false);
+
+    // Permisos
+    const puedeCrear = isAdmin || tienePermiso('ventas_crear');
+    const puedeAjustarPrecio = isAdmin || tienePermiso('ventas_ajustar_precio');
+    const puedeAnular = isAdmin || tienePermiso('ventas_anular');
 
     useEffect(() => {
-        cargarVentas();
         cargarProductos();
-        if (isAdmin) {
-            cargarSedes();
-            cargarUsuarios();
+        cargarSedes();
+        cargarVentas();
+        if (usuario?.sede_id) {
+            setSedeId(usuario.sede_id);
         }
-    }, [filtroSedeId, filtroFecha, filtroMetodo, filtroFechaInicio, filtroFechaFin, filtroUsuario]);
+    }, []);
 
-    const cargarSedes = async () => {
+    const cargarProductos = async () => {
         try {
-            const response = await api.getSedes();
-            setSedes(response.data.sedes || response.data);
+            const response = await apiClient.get('/productos/');
+            setProductos(response.data);
         } catch (error) {
-            console.error('Error cargando sedes:', error);
-        }
-    };
-
-    const cargarUsuarios = async () => {
-        try {
-            const response = await api.getUsuarios();
-            setUsuarios(response.data);
-        } catch (error) {
-            console.error('Error cargando usuarios:', error);
-        }
-    };
-
-    const cargarVentas = async () => {
-        try {
-            setLoading(true);
-            const params: any = {};
-            if (isVendedor && sedeId) params.sede_id = sedeId;
-            if (isAdmin && filtroSedeId) params.sede_id = filtroSedeId;
-            if (filtroFecha) params.fecha = filtroFecha;
-            if (filtroFechaInicio) params.fecha_inicio = filtroFechaInicio;
-            if (filtroFechaFin) params.fecha_fin = filtroFechaFin;
-            if (filtroMetodo) params.metodo_pago = filtroMetodo;
-            if (filtroUsuario) params.usuario_id = filtroUsuario;
-            
-            const response = await api.getVentas(params);
-            let ventasData = response.data.ventas || response.data;
-            
-            for (let i = 0; i < ventasData.length; i++) {
-                try {
-                    const detallesResponse = await api.getVentaDetalles(ventasData[i].id);
-                    ventasData[i].detalles = detallesResponse.data;
-                } catch (e) {
-                    ventasData[i].detalles = [];
-                }
-                
-                if (!ventasData[i].nombre_usuario && ventasData[i].usuario_id) {
-                    const usuarioEncontrado = usuarios.find(u => u.id === ventasData[i].usuario_id);
-                    if (usuarioEncontrado) {
-                        ventasData[i].nombre_usuario = usuarioEncontrado.nombre_completo;
-                    }
-                }
-            }
-            
-            setVentas(ventasData);
-            
-            const totalV = ventasData.reduce((sum: number, v: Venta) => sum + (v.anulada ? 0 : 1), 0);
-            const totalI = ventasData.reduce((sum: number, v: Venta) => sum + (v.anulada ? 0 : v.total), 0);
-            setTotalVentas(totalV);
-            setTotalIngresos(totalI);
-        } catch (error) {
-            console.error('Error cargando ventas:', error);
-            setError('Error al cargar las ventas');
+            console.error('Error cargando productos:', error);
         } finally {
             setLoading(false);
         }
     };
 
-    const cargarProductos = async () => {
+    const cargarSedes = async () => {
         try {
-            console.log('Cargando productos desde:', '/productos');
-            const response = await api.getProductos();
-            console.log('Productos recibidos:', response.data);
-            
-            // Verificar que response.data es un array
-            if (Array.isArray(response.data)) {
-                setProductos(response.data);
-            } else if (response.data.productos) {
-                setProductos(response.data.productos);
-            } else {
-                console.error('Formato de respuesta inesperado:', response.data);
-                setProductos([]);
-            }
+            const response = await apiClient.get('/sedes/');
+            setSedes(response.data.sedes || []);
         } catch (error) {
-            console.error('Error cargando productos:', error);
-            setError('Error al cargar los productos');
+            console.error('Error cargando sedes:', error);
         }
     };
 
-    const handleSubmit = async () => {
-        if (selectedProducts.length === 0) {
-            setError('Agrega al menos un producto');
+    const cargarVentas = async () => {
+        try {
+            const response = await apiClient.get('/ventas/?limit=50');
+            setVentas(response.data.ventas || []);
+        } catch (error) {
+            console.error('Error cargando ventas:', error);
+        }
+    };
+
+    const verDetallesVenta = async (ventaId: number) => {
+        try {
+            setLoadingDetalles(true);
+            setShowDetallesModal(true);
+            
+            // Obtener detalles de la venta
+            const response = await apiClient.get(`/ventas/${ventaId}/detalles`);
+            const detalles = response.data;
+            
+            // Enriquecer detalles con información del producto
+            const detallesEnriquecidos = await Promise.all(
+                detalles.map(async (detalle: VentaDetalleFull) => {
+                    try {
+                        const productoResponse = await apiClient.get(`/productos/${detalle.producto_id}`);
+                        return {
+                            ...detalle,
+                            producto: productoResponse.data
+                        };
+                    } catch {
+                        return {
+                            ...detalle,
+                            producto: { nombre: 'Producto no encontrado', sku: 'N/A' }
+                        };
+                    }
+                })
+            );
+            
+            setDetallesVenta(detallesEnriquecidos);
+            
+            // Obtener la venta completa
+            const ventaResponse = await apiClient.get(`/ventas/${ventaId}`);
+            setVentaSeleccionada(ventaResponse.data);
+            
+        } catch (error) {
+            console.error('Error cargando detalles de venta:', error);
+            alert('Error al cargar los detalles de la venta');
+        } finally {
+            setLoadingDetalles(false);
+        }
+    };
+
+    const productosFiltrados = productos.filter(p =>
+        p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        p.sku.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const agregarAlCarrito = () => {
+        if (!selectedProduct) return;
+        if (cantidad <= 0) {
+            alert('La cantidad debe ser mayor a 0');
+            return;
+        }
+
+        const precioUnit = puedeAjustarPrecio ? selectedProduct.precio_venta : selectedProduct.precio_venta;
+        const subtotal = precioUnit * cantidad;
+
+        const nuevoItem: VentaDetalle = {
+            producto_id: selectedProduct.id,
+            cantidad,
+            precio_unit: precioUnit,
+            subtotal,
+            producto_nombre: selectedProduct.nombre
+        };
+
+        setCarrito([...carrito, nuevoItem]);
+        setSelectedProduct(null);
+        setCantidad(1);
+        setSearchTerm('');
+    };
+
+    const eliminarDelCarrito = (index: number) => {
+        setCarrito(carrito.filter((_, i) => i !== index));
+    };
+
+    const totalCarrito = carrito.reduce((sum, item) => sum + item.subtotal, 0);
+    const cambio = efectivo ? efectivo - totalCarrito : 0;
+
+    const handleCrearVenta = async () => {
+        if (carrito.length === 0) {
+            alert('Agrega al menos un producto al carrito');
+            return;
+        }
+
+        if (metodoPago === 'mixto') {
+            const efectivoValor = efectivo || 0;
+            const transferenciaValor = transferencia || 0;
+            if (efectivoValor + transferenciaValor < totalCarrito) {
+                alert('El total de efectivo + transferencia debe ser mayor o igual al total de la venta');
+                return;
+            }
+        } else if (metodoPago === 'efectivo' && (efectivo || 0) < totalCarrito) {
+            alert('El efectivo debe ser mayor o igual al total de la venta');
+            return;
+        } else if (metodoPago === 'transferencia' && (transferencia || 0) < totalCarrito) {
+            alert('La transferencia debe ser mayor o igual al total de la venta');
             return;
         }
 
         try {
             const ventaData = {
-                sede_id: isVendedor ? sedeId : (filtroSedeId || 1),
+                sede_id: sedeId,
+                usuario_id: usuario?.id || 1,
+                total: totalCarrito,
                 metodo_pago: metodoPago,
-                notas: notas,
-                detalles: selectedProducts.map(p => ({
-                    producto_id: p.producto_id,
-                    cantidad: p.cantidad,
-                    precio_unit: p.precio_unit,
-                    precio_original: p.precio_original
+                efectivo: metodoPago === 'efectivo' || metodoPago === 'mixto' ? efectivo : null,
+                transferencia: metodoPago === 'transferencia' || metodoPago === 'mixto' ? transferencia : null,
+                notas: notas || undefined,
+                detalles: carrito.map(item => ({
+                    producto_id: item.producto_id,
+                    cantidad: item.cantidad,
+                    precio_unit: item.precio_unit,
+                    subtotal: item.subtotal
                 }))
             };
 
-            await api.createVenta(ventaData);
-            
-            setShowModal(false);
-            setSelectedProducts([]);
-            setMetodoPago('efectivo');
+            await apiClient.post('/ventas/', ventaData);
+            alert('✅ Venta creada exitosamente');
+            setCarrito([]);
+            setEfectivo(null);
+            setTransferencia(null);
             setNotas('');
-            setSuccess('Venta registrada exitosamente');
-            setTimeout(() => setSuccess(''), 3000);
+            setShowModal(false);
             cargarVentas();
-            cargarProductos();
         } catch (error: any) {
-            setError(error.response?.data?.detail || 'Error al guardar la venta');
-            setTimeout(() => setError(''), 3000);
+            console.error('Error creando venta:', error);
+            alert(error.response?.data?.detail || 'Error al crear la venta');
         }
     };
 
-    const handleAnular = async (venta: Venta) => {
-        if (venta.anulada) {
-            setError('Esta venta ya está anulada');
+    const handleAnularVenta = async (ventaId: number) => {
+        if (!puedeAnular) {
+            alert('No tienes permiso para anular ventas');
             return;
         }
-        
         const motivo = prompt('Motivo de anulación:');
-        if (!motivo) return;
-        
+        if (motivo === null) return;
         try {
-            await api.deleteVenta(venta.id, motivo);
-            setSuccess('Venta anulada exitosamente');
-            setTimeout(() => setSuccess(''), 3000);
+            await apiClient.post(`/ventas/${ventaId}/anular`, { motivo });
+            alert('✅ Venta anulada correctamente');
             cargarVentas();
+            setShowDetallesModal(false);
         } catch (error: any) {
-            setError(error.response?.data?.detail || 'Error al anular la venta');
-            setTimeout(() => setError(''), 3000);
+            console.error('Error anulando venta:', error);
+            alert(error.response?.data?.detail || 'Error al anular la venta');
         }
     };
 
-    const verDetalle = async (venta: Venta) => {
-        try {
-            const response = await api.getVentaDetalles(venta.id);
-            const ventaConDetalles = { ...venta, detalles: response.data };
-            setSelectedVenta(ventaConDetalles);
-            setShowDetailModal(true);
-        } catch (error) {
-            console.error('Error cargando detalle:', error);
-            setError('Error al cargar el detalle de la venta');
-            setTimeout(() => setError(''), 3000);
-        }
+    const formatearFecha = (fecha: string) => {
+        return new Date(fecha).toLocaleDateString('es-CO', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
     };
 
-    const agregarProducto = (producto: Producto) => {
-        const existente = selectedProducts.find(p => p.producto_id === producto.id);
-        if (existente) {
-            actualizarCantidad(
-                selectedProducts.findIndex(p => p.producto_id === producto.id),
-                existente.cantidad + 1
-            );
-        } else {
-            setSelectedProducts([...selectedProducts, {
-                producto_id: producto.id,
-                cantidad: 1,
-                precio_unit: producto.precio_venta,
-                precio_original: undefined
-            }]);
-        }
-    };
-
-    const eliminarProducto = (index: number) => {
-        const nuevos = selectedProducts.filter((_, i) => i !== index);
-        setSelectedProducts(nuevos);
-    };
-
-    const actualizarCantidad = (index: number, cantidad: number) => {
-        if (cantidad < 1) return;
-        const nuevos = [...selectedProducts];
-        nuevos[index].cantidad = cantidad;
-        setSelectedProducts(nuevos);
-    };
-
-    const ajustarPrecio = (index: number, nuevoPrecio: number) => {
-        const nuevos = [...selectedProducts];
-        const productoOriginal = productos.find(p => p.id === nuevos[index].producto_id);
-        
-        nuevos[index].precio_unit = nuevoPrecio;
-        nuevos[index].precio_original = productoOriginal?.precio_venta;
-        setSelectedProducts(nuevos);
-        setAjusteData(null);
-    };
-
-    const calcularTotal = () => {
-        return selectedProducts.reduce((sum, item) => sum + (item.cantidad * item.precio_unit), 0);
-    };
-
-    const limpiarFiltros = () => {
-        setFiltroSedeId(null);
-        setFiltroFecha('');
-        setFiltroFechaInicio('');
-        setFiltroFechaFin('');
-        setFiltroMetodo('');
-        setFiltroUsuario(null);
-    };
-
-    const getMetodoPagoIcon = (metodo: string) => {
-        return metodo === 'efectivo' ? '💰' : '💳';
-    };
-
-    const getMetodoPagoColor = (metodo: string) => {
-        return metodo === 'efectivo' ? '#00ff88' : '#00aaff';
-    };
-
-    const getNombreVendedor = (venta: Venta) => {
-        if (venta.nombre_usuario) return venta.nombre_usuario;
-        const usuarioEncontrado = usuarios.find(u => u.id === venta.usuario_id);
-        return usuarioEncontrado?.nombre_completo || usuarioEncontrado?.username || `ID: ${venta.usuario_id}`;
-    };
-
-    if (loading) return <div style={{ textAlign: 'center', padding: '1.8rem', color: '#00ff88', fontSize: '0.85rem' }}>CARGANDO VENTAS...</div>;
+    if (loading) {
+        return <div style={{ color: '#00ff88', textAlign: 'center', padding: '2rem' }}>CARGANDO PRODUCTOS...</div>;
+    }
 
     return (
-        <div style={{ padding: '0.9rem' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.35rem', flexWrap: 'wrap', gap: '0.9rem' }}>
-                <h2 className="section-title" style={{ fontSize: '1.28rem', marginBottom: '0' }}>💰 VENTAS</h2>
-                <button onClick={() => setShowModal(true)} className="btn-login" style={{ width: 'auto', padding: '0.45rem 1.35rem', fontSize: '0.76rem' }}>
-                    + NUEVA VENTA
-                </button>
+        <div style={{ padding: '0.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                <h3 style={{ color: '#00ff88' }}>💰 VENTAS</h3>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                        onClick={() => setShowVentasList(!showVentasList)}
+                        style={{
+                            background: 'transparent',
+                            color: '#94a3b8',
+                            border: '1px solid #1e293b',
+                            padding: '0.5rem 1rem',
+                            borderRadius: '0.47rem',
+                            cursor: 'pointer',
+                            fontSize: '0.8rem'
+                        }}
+                    >
+                        📋 {showVentasList ? 'Ocultar' : 'Ver'} Ventas
+                    </button>
+                    {puedeCrear && (
+                        <button
+                            onClick={() => setShowModal(true)}
+                            style={{
+                                background: '#00ff88',
+                                color: '#0a0a0a',
+                                border: 'none',
+                                padding: '0.5rem 1rem',
+                                borderRadius: '0.47rem',
+                                cursor: 'pointer',
+                                fontWeight: 'bold',
+                                fontSize: '0.8rem'
+                            }}
+                        >
+                            + NUEVA VENTA
+                        </button>
+                    )}
+                </div>
             </div>
 
-            {/* Tarjetas de resumen */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.9rem', marginBottom: '1.35rem' }}>
-                <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '0.66rem', padding: '0.9rem', textAlign: 'center' }}>
-                    <div style={{ fontSize: '0.7rem', color: '#64748b' }}>TOTAL VENTAS</div>
-                    <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#00ff88' }}>{totalVentas}</div>
-                </div>
-                <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '0.66rem', padding: '0.9rem', textAlign: 'center' }}>
-                    <div style={{ fontSize: '0.7rem', color: '#64748b' }}>TOTAL INGRESOS</div>
-                    <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#00ff88' }}>${totalIngresos.toLocaleString()}</div>
-                </div>
-            </div>
-
-            {/* Mensajes */}
-            {error && <div style={{ background: 'rgba(255,68,68,0.15)', border: '1px solid #ff4444', color: '#ff4444', padding: '0.66rem', borderRadius: '0.45rem', marginBottom: '0.9rem', fontSize: '0.76rem' }}>❌ {error}</div>}
-            {success && <div style={{ background: 'rgba(0,255,136,0.15)', border: '1px solid #00ff88', color: '#00ff88', padding: '0.66rem', borderRadius: '0.45rem', marginBottom: '0.9rem', fontSize: '0.76rem' }}>✅ {success}</div>}
-
-            {/* Filtros para Admin */}
-            {isAdmin && (
-                <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '0.66rem', padding: '0.9rem', marginBottom: '1.35rem' }}>
-                    <div style={{ display: 'flex', gap: '0.9rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                        <div style={{ flex: 1, minWidth: '120px' }}>
-                            <label style={{ fontSize: '0.6rem', color: '#64748b', display: 'block', marginBottom: '0.2rem' }}>SEDE</label>
-                            <select 
-                                value={filtroSedeId || ''} 
-                                onChange={(e) => setFiltroSedeId(e.target.value ? parseInt(e.target.value) : null)} 
-                                style={{ width: '100%', padding: '0.45rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.45rem', color: 'white', fontSize: '0.76rem' }}
-                            >
-                                <option value="">Todas las sedes</option>
-                                {sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-                            </select>
+            {/* Lista de ventas recientes */}
+            {showVentasList && (
+                <div style={{
+                    background: '#0f0f0f',
+                    border: '1px solid #1a1a1a',
+                    borderRadius: '0.95rem',
+                    padding: '1rem',
+                    marginBottom: '1.5rem'
+                }}>
+                    <h4 style={{ color: '#e2e8f0', fontSize: '0.9rem', marginBottom: '0.5rem' }}>📋 VENTAS RECIENTES</h4>
+                    {ventas.length === 0 ? (
+                        <p style={{ color: '#64748b', fontSize: '0.8rem' }}>No hay ventas registradas</p>
+                    ) : (
+                        <div style={{ overflow: 'auto', maxHeight: '300px' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                <thead>
+                                    <tr style={{ borderBottom: '1px solid #1a1a1a' }}>
+                                        <th style={{ padding: '0.5rem', textAlign: 'left', color: '#64748b', fontSize: '0.65rem' }}>ID</th>
+                                        <th style={{ padding: '0.5rem', textAlign: 'left', color: '#64748b', fontSize: '0.65rem' }}>Fecha</th>
+                                        <th style={{ padding: '0.5rem', textAlign: 'right', color: '#64748b', fontSize: '0.65rem' }}>Total</th>
+                                        <th style={{ padding: '0.5rem', textAlign: 'center', color: '#64748b', fontSize: '0.65rem' }}>Pago</th>
+                                        <th style={{ padding: '0.5rem', textAlign: 'center', color: '#64748b', fontSize: '0.65rem' }}>Estado</th>
+                                        <th style={{ padding: '0.5rem', textAlign: 'center', color: '#64748b', fontSize: '0.65rem' }}>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {ventas.map((v) => (
+                                        <tr key={v.id} style={{ borderBottom: '1px solid #1a1a1a' }}>
+                                            <td style={{ padding: '0.5rem', fontSize: '0.7rem' }}>#{v.id}</td>
+                                            <td style={{ padding: '0.5rem', fontSize: '0.7rem', color: '#94a3b8' }}>
+                                                {formatearFecha(v.created_at)}
+                                            </td>
+                                            <td style={{ padding: '0.5rem', textAlign: 'right', fontSize: '0.7rem', color: '#00ff88' }}>
+                                                ${v.total.toLocaleString()}
+                                            </td>
+                                            <td style={{ padding: '0.5rem', textAlign: 'center', fontSize: '0.7rem' }}>
+                                                {v.metodo_pago === 'efectivo' ? '💰' : v.metodo_pago === 'transferencia' ? '💳' : '💳💰'}
+                                            </td>
+                                            <td style={{ padding: '0.5rem', textAlign: 'center', fontSize: '0.7rem' }}>
+                                                <span style={{
+                                                    color: v.anulada ? '#ff4444' : '#00ff88',
+                                                    fontSize: '0.65rem'
+                                                }}>
+                                                    {v.anulada ? '❌ Anulada' : '✅ Activa'}
+                                                </span>
+                                            </td>
+                                            <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                                                <button
+                                                    onClick={() => verDetallesVenta(v.id)}
+                                                    style={{
+                                                        background: 'none',
+                                                        border: 'none',
+                                                        color: '#00aaff',
+                                                        cursor: 'pointer',
+                                                        fontSize: '0.8rem',
+                                                        marginRight: '0.3rem'
+                                                    }}
+                                                    title="Ver detalles"
+                                                >
+                                                    📄
+                                                </button>
+                                                {puedeAnular && !v.anulada && (
+                                                    <button
+                                                        onClick={() => handleAnularVenta(v.id)}
+                                                        style={{
+                                                            background: 'none',
+                                                            border: 'none',
+                                                            color: '#ff4444',
+                                                            cursor: 'pointer',
+                                                            fontSize: '0.8rem'
+                                                        }}
+                                                        title="Anular venta"
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
-                        <div style={{ flex: 1, minWidth: '120px' }}>
-                            <label style={{ fontSize: '0.6rem', color: '#64748b', display: 'block', marginBottom: '0.2rem' }}>VENDEDOR</label>
-                            <select 
-                                value={filtroUsuario || ''} 
-                                onChange={(e) => setFiltroUsuario(e.target.value ? parseInt(e.target.value) : null)} 
-                                style={{ width: '100%', padding: '0.45rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.45rem', color: 'white', fontSize: '0.76rem' }}
-                            >
-                                <option value="">Todos los vendedores</option>
-                                {usuarios.map(u => <option key={u.id} value={u.id}>{u.nombre_completo}</option>)}
-                            </select>
-                        </div>
-                        <div style={{ flex: 1, minWidth: '120px' }}>
-                            <label style={{ fontSize: '0.6rem', color: '#64748b', display: 'block', marginBottom: '0.2rem' }}>FECHA INICIO</label>
-                            <input 
-                                type="date" 
-                                value={filtroFechaInicio} 
-                                onChange={(e) => setFiltroFechaInicio(e.target.value)} 
-                                style={{ width: '100%', padding: '0.45rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.45rem', color: 'white', fontSize: '0.76rem' }} 
-                            />
-                        </div>
-                        <div style={{ flex: 1, minWidth: '120px' }}>
-                            <label style={{ fontSize: '0.6rem', color: '#64748b', display: 'block', marginBottom: '0.2rem' }}>FECHA FIN</label>
-                            <input 
-                                type="date" 
-                                value={filtroFechaFin} 
-                                onChange={(e) => setFiltroFechaFin(e.target.value)} 
-                                style={{ width: '100%', padding: '0.45rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.45rem', color: 'white', fontSize: '0.76rem' }} 
-                            />
-                        </div>
-                        <div style={{ flex: 1, minWidth: '100px' }}>
-                            <label style={{ fontSize: '0.6rem', color: '#64748b', display: 'block', marginBottom: '0.2rem' }}>MÉTODO</label>
-                            <select 
-                                value={filtroMetodo} 
-                                onChange={(e) => setFiltroMetodo(e.target.value)} 
-                                style={{ width: '100%', padding: '0.45rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.45rem', color: 'white', fontSize: '0.76rem' }}
-                            >
-                                <option value="">Todos</option>
-                                <option value="efectivo">💰 Efectivo</option>
-                                <option value="transferencia">💳 Transferencia</option>
-                            </select>
-                        </div>
-                        <button onClick={cargarVentas} style={{ padding: '0.45rem 0.9rem', background: '#00ff88', border: 'none', borderRadius: '0.45rem', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.76rem' }}>
-                            FILTRAR
-                        </button>
-                        <button onClick={limpiarFiltros} style={{ padding: '0.45rem 0.9rem', background: '#1e293b', border: 'none', borderRadius: '0.45rem', cursor: 'pointer', color: '#94a3b8', fontSize: '0.76rem' }}>
-                            LIMPIAR
-                        </button>
-                    </div>
+                    )}
                 </div>
             )}
-
-            {/* Tabla de ventas */}
-            <div style={{ overflow: 'auto', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '0.66rem' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                        <tr style={{ borderBottom: '1px solid #1a1a1a' }}>
-                            <th style={{ padding: '0.66rem', textAlign: 'left', color: '#64748b', fontSize: '0.66rem' }}>ID</th>
-                            {isAdmin && <th style={{ padding: '0.66rem', textAlign: 'left', color: '#64748b', fontSize: '0.66rem' }}>SEDE</th>}
-                            <th style={{ padding: '0.66rem', textAlign: 'left', color: '#64748b', fontSize: '0.66rem' }}>FECHA</th>
-                            <th style={{ padding: '0.66rem', textAlign: 'left', color: '#64748b', fontSize: '0.66rem' }}>VENDEDOR</th>
-                            <th style={{ padding: '0.66rem', textAlign: 'right', color: '#64748b', fontSize: '0.66rem' }}>TOTAL</th>
-                            <th style={{ padding: '0.66rem', textAlign: 'center', color: '#64748b', fontSize: '0.66rem' }}>PAGO</th>
-                            <th style={{ padding: '0.66rem', textAlign: 'center', color: '#64748b', fontSize: '0.66rem' }}>ESTADO</th>
-                            <th style={{ padding: '0.66rem', textAlign: 'center', color: '#64748b', fontSize: '0.66rem' }}>ACCIONES</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {ventas.length === 0 ? (
-                            <tr>
-                                <td colSpan={isAdmin ? 8 : 7} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-                                    No hay ventas registradas
-                                </td>
-                            </tr>
-                        ) : (
-                            ventas.map((venta) => (
-                                <tr key={venta.id} style={{ borderBottom: '1px solid #1a1a1a', opacity: venta.anulada ? 0.5 : 1 }}>
-                                    <td style={{ padding: '0.66rem', fontSize: '0.72rem' }}>#{venta.id}</td>
-                                    {isAdmin && <td style={{ padding: '0.66rem', fontSize: '0.72rem', color: '#00ff88' }}>{venta.sede_nombre || `Sede ${venta.sede_id}`}</td>}
-                                    <td style={{ padding: '0.66rem', fontSize: '0.72rem' }}>{new Date(venta.created_at).toLocaleDateString()} {new Date(venta.created_at).toLocaleTimeString()}</td>
-                                    <td style={{ padding: '0.66rem', fontSize: '0.72rem' }}>{getNombreVendedor(venta)}</td>
-                                    <td style={{ padding: '0.66rem', textAlign: 'right', fontSize: '0.72rem', color: '#00ff88' }}>${venta.total.toLocaleString()}</td>
-                                    <td style={{ padding: '0.66rem', textAlign: 'center', fontSize: '0.72rem' }}>
-                                        <span style={{ color: getMetodoPagoColor(venta.metodo_pago) }}>
-                                            {getMetodoPagoIcon(venta.metodo_pago)} {venta.metodo_pago === 'efectivo' ? 'Efectivo' : 'Transferencia'}
-                                        </span>
-                                    </td>
-                                    <td style={{ padding: '0.66rem', textAlign: 'center', fontSize: '0.72rem' }}>
-                                        {venta.anulada ? (
-                                            <span style={{ color: '#ff4444' }}>❌ ANULADA</span>
-                                        ) : (
-                                            <span style={{ color: '#00ff88' }}>✅ ACTIVA</span>
-                                        )}
-                                    </td>
-                                    <td style={{ padding: '0.66rem', textAlign: 'center' }}>
-                                        <div style={{ display: 'flex', gap: '0.3rem', justifyContent: 'center' }}>
-                                            <button 
-                                                onClick={() => verDetalle(venta)} 
-                                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem' }}
-                                                title="Ver detalles"
-                                            >
-                                                👁️
-                                            </button>
-                                            <button 
-                                                onClick={() => handleAnular(venta)} 
-                                                disabled={venta.anulada} 
-                                                style={{ background: 'none', border: 'none', cursor: venta.anulada ? 'not-allowed' : 'pointer', opacity: venta.anulada ? 0.5 : 1, fontSize: '1rem' }}
-                                                title="Anular venta"
-                                            >
-                                                🗑️
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
-            </div>
 
             {/* Modal de Nueva Venta */}
             {showModal && (
-                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-                    <div style={{ background: '#0a0a0a', border: '1px solid #00ff88', borderRadius: '0.9rem', padding: '1.8rem', width: '90%', maxWidth: '600px', maxHeight: '80vh', overflow: 'auto' }}>
-                        <h3 style={{ color: '#00ff88', marginBottom: '0.9rem', fontSize: '1.12rem' }}>💰 NUEVA VENTA</h3>
-                        
-                        <div style={{ marginBottom: '0.9rem' }}>
-                            <label className="input-label" style={{ fontSize: '0.7rem', color: '#64748b', display: 'block', marginBottom: '0.3rem' }}>➕ AGREGAR PRODUCTO</label>
-                            <select 
-                                onChange={(e) => { 
-                                    const p = productos.find(prod => prod.id === parseInt(e.target.value)); 
-                                    if (p) agregarProducto(p); 
-                                    e.target.value = '';
-                                }} 
-                                value="" 
-                                style={{ width: '100%', padding: '0.45rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.45rem', color: 'white', fontSize: '0.76rem' }}
-                            >
-                                <option value="">Seleccionar producto...</option>
-                                {productos.map(p => (
-                                    <option key={p.id} value={p.id}>
-                                        {p.nombre} - ${p.precio_venta.toLocaleString()}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div style={{ marginBottom: '0.9rem', maxHeight: '250px', overflow: 'auto' }}>
-                            <label className="input-label" style={{ fontSize: '0.7rem', color: '#64748b', display: 'block', marginBottom: '0.3rem' }}>📋 PRODUCTOS EN VENTA</label>
-                            {selectedProducts.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: '1rem', color: '#64748b', fontSize: '0.7rem' }}>
-                                    No hay productos agregados
-                                </div>
-                            ) : (
-                                selectedProducts.map((item, idx) => {
-                                    const prod = productos.find(p => p.id === item.producto_id);
-                                    const tieneAjuste = item.precio_original && item.precio_original !== item.precio_unit;
-                                    return (
-                                        <div key={idx} style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', marginBottom: '0.45rem', padding: '0.45rem', background: '#111', borderRadius: '0.45rem', flexWrap: 'wrap' }}>
-                                            <span style={{ flex: 2, fontSize: '0.72rem' }}>{prod?.nombre}</span>
-                                            <input 
-                                                type="number" 
-                                                value={item.cantidad} 
-                                                onChange={(e) => actualizarCantidad(idx, parseInt(e.target.value))} 
-                                                style={{ width: '60px', padding: '0.27rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.27rem', color: 'white', fontSize: '0.7rem', textAlign: 'center' }} 
-                                            />
-                                            <span style={{ width: '80px', fontSize: '0.72rem', color: '#00ff88', textAlign: 'right' }}>
-                                                ${(item.cantidad * item.precio_unit).toLocaleString()}
-                                            </span>
-                                            <button
-                                                onClick={() => setAjusteData({
-                                                    producto_id: item.producto_id,
-                                                    precio_original: item.precio_original || item.precio_unit,
-                                                    precio_nuevo: item.precio_unit
-                                                })}
-                                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', color: '#00ff88' }}
-                                                title="Ajustar precio"
-                                            >
-                                                ✏️
-                                            </button>
-                                            <button onClick={() => eliminarProducto(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ff4444', fontSize: '0.9rem' }}>❌</button>
-                                            {tieneAjuste && (
-                                                <div style={{ width: '100%', fontSize: '0.6rem', color: '#ffaa00' }}>
-                                                    Precio ajustado (original: ${item.precio_original?.toLocaleString()})
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })
-                            )}
-                        </div>
-
-                        <div style={{ marginBottom: '0.9rem' }}>
-                            <label className="input-label" style={{ fontSize: '0.7rem', color: '#64748b', display: 'block', marginBottom: '0.3rem' }}>💳 MÉTODO DE PAGO</label>
-                            <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} style={{ width: '100%', padding: '0.45rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.45rem', color: 'white', fontSize: '0.76rem' }}>
-                                <option value="efectivo">💰 Efectivo</option>
-                                <option value="transferencia">💳 Transferencia</option>
-                            </select>
-                        </div>
-
-                        <div style={{ marginBottom: '0.9rem' }}>
-                            <label className="input-label" style={{ fontSize: '0.7rem', color: '#64748b', display: 'block', marginBottom: '0.3rem' }}>📝 NOTAS (OPCIONAL)</label>
-                            <textarea value={notas} onChange={(e) => setNotas(e.target.value)} style={{ width: '100%', padding: '0.45rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.45rem', color: 'white', fontSize: '0.76rem' }} rows={2} placeholder="Observaciones de la venta..." />
-                        </div>
-
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.9rem', paddingTop: '0.9rem', borderTop: '1px solid #1a1a1a' }}>
-                            <span style={{ fontSize: '0.9rem', color: '#64748b' }}>TOTAL:</span>
-                            <span style={{ fontSize: '1.35rem', fontWeight: 'bold', color: '#00ff88' }}>${calcularTotal().toLocaleString()}</span>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: '0.9rem' }}>
-                            <button onClick={handleSubmit} className="btn-login" style={{ flex: 1, padding: '0.45rem', fontSize: '0.72rem' }}>REGISTRAR VENTA</button>
-                            <button onClick={() => { setShowModal(false); setSelectedProducts([]); }} style={{ flex: 1, padding: '0.45rem', background: 'transparent', border: '1px solid #1e293b', borderRadius: '0.45rem', color: '#94a3b8', cursor: 'pointer', fontSize: '0.72rem' }}>CANCELAR</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Modal de ajuste de precio */}
-            {ajusteData && (
                 <div style={{
                     position: 'fixed',
-                    top: 0, left: 0, right: 0, bottom: 0,
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
                     background: 'rgba(0,0,0,0.95)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    zIndex: 1001
+                    zIndex: 1000,
+                    overflow: 'auto'
                 }}>
                     <div style={{
                         background: '#0a0a0a',
                         border: '1px solid #00ff88',
-                        borderRadius: '1rem',
-                        padding: '2rem',
+                        borderRadius: '0.95rem',
+                        padding: '1.9rem',
                         width: '90%',
-                        maxWidth: '400px'
+                        maxWidth: '900px',
+                        maxHeight: '90vh',
+                        overflow: 'auto'
                     }}>
-                        <h3 style={{ color: '#00ff88', marginBottom: '1rem' }}>✏️ AJUSTAR PRECIO</h3>
+                        <h3 style={{ color: '#00ff88', marginBottom: '0.5rem' }}>🛒 NUEVA VENTA</h3>
+                        <p style={{ color: '#64748b', fontSize: '0.8rem', marginBottom: '1.5rem' }}>
+                            Sede: {sedes.find(s => s.id === sedeId)?.nombre || 'Seleccionar'}
+                        </p>
+
+                        {/* Selección de Sede */}
+                        {isAdmin && (
+                            <div style={{ marginBottom: '1rem' }}>
+                                <label style={{ color: '#64748b', fontSize: '0.7rem' }}>SEDE</label>
+                                <select
+                                    value={sedeId}
+                                    onChange={(e) => setSedeId(parseInt(e.target.value))}
+                                    style={{
+                                        width: '100%',
+                                        padding: '0.47rem',
+                                        background: '#1a1a1a',
+                                        border: '1px solid #1e293b',
+                                        borderRadius: '0.47rem',
+                                        color: '#e2e8f0',
+                                        fontSize: '0.8rem',
+                                        marginTop: '0.25rem'
+                                    }}
+                                >
+                                    {sedes.map(s => (
+                                        <option key={s.id} value={s.id}>{s.nombre}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
+                        {/* Buscador de productos */}
+                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                            <input
+                                type="text"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                placeholder="Buscar producto por nombre o SKU..."
+                                style={{
+                                    flex: 1,
+                                    padding: '0.47rem',
+                                    background: '#1a1a1a',
+                                    border: '1px solid #1e293b',
+                                    borderRadius: '0.47rem',
+                                    color: '#e2e8f0',
+                                    fontSize: '0.8rem'
+                                }}
+                            />
+                            {selectedProduct && (
+                                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                    <span style={{ color: '#00ff88', fontSize: '0.8rem' }}>
+                                        {selectedProduct.nombre} - ${selectedProduct.precio_venta.toLocaleString()}
+                                    </span>
+                                    <input
+                                        type="number"
+                                        value={cantidad}
+                                        onChange={(e) => setCantidad(Math.max(1, parseInt(e.target.value) || 1))}
+                                        min="1"
+                                        style={{
+                                            width: '60px',
+                                            padding: '0.47rem',
+                                            background: '#1a1a1a',
+                                            border: '1px solid #1e293b',
+                                            borderRadius: '0.47rem',
+                                            color: '#e2e8f0',
+                                            fontSize: '0.8rem',
+                                            textAlign: 'center'
+                                        }}
+                                    />
+                                    <button
+                                        onClick={agregarAlCarrito}
+                                        style={{
+                                            background: '#00ff88',
+                                            color: '#0a0a0a',
+                                            border: 'none',
+                                            padding: '0.47rem 1rem',
+                                            borderRadius: '0.47rem',
+                                            cursor: 'pointer',
+                                            fontWeight: 'bold',
+                                            fontSize: '0.8rem'
+                                        }}
+                                    >
+                                        Agregar
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Lista de productos */}
+                        {!selectedProduct && (
+                            <div style={{
+                                maxHeight: '150px',
+                                overflow: 'auto',
+                                marginBottom: '1rem',
+                                border: '1px solid #1a1a1a',
+                                borderRadius: '0.47rem'
+                            }}>
+                                {productosFiltrados.map(p => (
+                                    <div
+                                        key={p.id}
+                                        onClick={() => setSelectedProduct(p)}
+                                        style={{
+                                            padding: '0.47rem 0.7rem',
+                                            borderBottom: '1px solid #1a1a1a',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            transition: 'background 0.3s'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = '#1a1a1a';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = 'transparent';
+                                        }}
+                                    >
+                                        <div>
+                                            <div style={{ color: '#e2e8f0', fontSize: '0.8rem' }}>{p.nombre}</div>
+                                            <div style={{ color: '#64748b', fontSize: '0.65rem' }}>SKU: {p.sku}</div>
+                                        </div>
+                                        <div style={{ color: '#00ff88', fontSize: '0.8rem', fontWeight: 'bold' }}>
+                                            ${p.precio_venta.toLocaleString()}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Carrito */}
                         <div style={{ marginBottom: '1rem' }}>
-                            <label style={{ fontSize: '0.7rem', color: '#64748b' }}>PRECIO ORIGINAL</label>
-                            <div style={{ fontSize: '1rem', color: '#ffaa00' }}>
-                                ${ajusteData.precio_original.toLocaleString()}
+                            <h4 style={{ color: '#e2e8f0', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                                🛒 CARRITO ({carrito.length} productos)
+                            </h4>
+                            <div style={{
+                                maxHeight: '200px',
+                                overflow: 'auto',
+                                border: '1px solid #1a1a1a',
+                                borderRadius: '0.47rem'
+                            }}>
+                                {carrito.length === 0 ? (
+                                    <div style={{ padding: '1rem', textAlign: 'center', color: '#64748b', fontSize: '0.8rem' }}>
+                                        No hay productos en el carrito
+                                    </div>
+                                ) : (
+                                    carrito.map((item, index) => (
+                                        <div
+                                            key={index}
+                                            style={{
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                alignItems: 'center',
+                                                padding: '0.47rem 0.7rem',
+                                                borderBottom: '1px solid #1a1a1a'
+                                            }}
+                                        >
+                                            <div>
+                                                <div style={{ color: '#e2e8f0', fontSize: '0.8rem' }}>
+                                                    {item.producto_nombre || `Producto ${item.producto_id}`}
+                                                </div>
+                                                <div style={{ color: '#64748b', fontSize: '0.65rem' }}>
+                                                    {item.cantidad} x ${item.precio_unit.toLocaleString()}
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <span style={{ color: '#00ff88', fontSize: '0.8rem', fontWeight: 'bold' }}>
+                                                    ${item.subtotal.toLocaleString()}
+                                                </span>
+                                                <button
+                                                    onClick={() => eliminarDelCarrito(index)}
+                                                    style={{
+                                                        background: 'none',
+                                                        border: 'none',
+                                                        color: '#ff4444',
+                                                        cursor: 'pointer',
+                                                        fontSize: '0.8rem'
+                                                    }}
+                                                >
+                                                    ❌
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                padding: '0.7rem',
+                                borderTop: '1px solid #00ff88',
+                                marginTop: '0.5rem'
+                            }}>
+                                <span style={{ color: '#e2e8f0', fontWeight: 'bold' }}>TOTAL</span>
+                                <span style={{ color: '#00ff88', fontSize: '1.2rem', fontWeight: 'bold' }}>
+                                    ${totalCarrito.toLocaleString()}
+                                </span>
                             </div>
                         </div>
+
+                        {/* Método de pago */}
                         <div style={{ marginBottom: '1rem' }}>
-                            <label style={{ fontSize: '0.7rem', color: '#64748b' }}>NUEVO PRECIO</label>
-                            <input
-                                type="number"
-                                value={ajusteData.precio_nuevo}
-                                onChange={(e) => setAjusteData({ ...ajusteData, precio_nuevo: parseFloat(e.target.value) })}
-                                style={{ width: '100%', padding: '0.5rem', background: '#1a1a1a', border: '1px solid #1e293b', borderRadius: '0.5rem', color: 'white' }}
+                            <label style={{ color: '#64748b', fontSize: '0.7rem' }}>MÉTODO DE PAGO</label>
+                            <select
+                                value={metodoPago}
+                                onChange={(e) => setMetodoPago(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    padding: '0.47rem',
+                                    background: '#1a1a1a',
+                                    border: '1px solid #1e293b',
+                                    borderRadius: '0.47rem',
+                                    color: '#e2e8f0',
+                                    fontSize: '0.8rem',
+                                    marginTop: '0.25rem'
+                                }}
+                            >
+                                <option value="efectivo">Efectivo</option>
+                                <option value="transferencia">Transferencia</option>
+                                <option value="mixto">Mixto (Efectivo + Transferencia)</option>
+                            </select>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+                            {(metodoPago === 'efectivo' || metodoPago === 'mixto') && (
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ color: '#64748b', fontSize: '0.7rem' }}>EFECTIVO</label>
+                                    <input
+                                        type="number"
+                                        value={efectivo || ''}
+                                        onChange={(e) => setEfectivo(parseFloat(e.target.value) || null)}
+                                        placeholder="$0"
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.47rem',
+                                            background: '#1a1a1a',
+                                            border: '1px solid #1e293b',
+                                            borderRadius: '0.47rem',
+                                            color: '#e2e8f0',
+                                            fontSize: '0.8rem',
+                                            marginTop: '0.25rem'
+                                        }}
+                                    />
+                                </div>
+                            )}
+                            {(metodoPago === 'transferencia' || metodoPago === 'mixto') && (
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ color: '#64748b', fontSize: '0.7rem' }}>TRANSFERENCIA</label>
+                                    <input
+                                        type="number"
+                                        value={transferencia || ''}
+                                        onChange={(e) => setTransferencia(parseFloat(e.target.value) || null)}
+                                        placeholder="$0"
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.47rem',
+                                            background: '#1a1a1a',
+                                            border: '1px solid #1e293b',
+                                            borderRadius: '0.47rem',
+                                            color: '#e2e8f0',
+                                            fontSize: '0.8rem',
+                                            marginTop: '0.25rem'
+                                        }}
+                                    />
+                                </div>
+                            )}
+                        </div>
+
+                        {metodoPago === 'efectivo' && efectivo && (
+                            <div style={{
+                                padding: '0.5rem',
+                                background: '#1a1a1a',
+                                borderRadius: '0.47rem',
+                                marginBottom: '1rem',
+                                textAlign: 'center'
+                            }}>
+                                <span style={{ color: '#64748b', fontSize: '0.7rem' }}>CAMBIO: </span>
+                                <span style={{ color: '#00ff88', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                                    ${Math.max(0, cambio).toLocaleString()}
+                                </span>
+                            </div>
+                        )}
+
+                        <div style={{ marginBottom: '1rem' }}>
+                            <label style={{ color: '#64748b', fontSize: '0.7rem' }}>NOTAS (opcional)</label>
+                            <textarea
+                                value={notas}
+                                onChange={(e) => setNotas(e.target.value)}
+                                placeholder="Observaciones de la venta..."
+                                style={{
+                                    width: '100%',
+                                    padding: '0.47rem',
+                                    background: '#1a1a1a',
+                                    border: '1px solid #1e293b',
+                                    borderRadius: '0.47rem',
+                                    color: '#e2e8f0',
+                                    fontSize: '0.8rem',
+                                    marginTop: '0.25rem',
+                                    resize: 'vertical',
+                                    minHeight: '50px'
+                                }}
                             />
                         </div>
-                        <div style={{ display: 'flex', gap: '1rem' }}>
+
+                        <div style={{ display: 'flex', gap: '0.95rem', marginTop: '0.95rem' }}>
                             <button
-                                onClick={() => {
-                                    const index = selectedProducts.findIndex(p => p.producto_id === ajusteData.producto_id);
-                                    if (index !== -1) {
-                                        ajustarPrecio(index, ajusteData.precio_nuevo);
-                                    }
+                                onClick={handleCrearVenta}
+                                disabled={carrito.length === 0}
+                                style={{
+                                    flex: 1,
+                                    padding: '0.6rem',
+                                    fontSize: '0.8rem',
+                                    background: carrito.length === 0 ? '#1a5a3a' : '#00ff88',
+                                    color: carrito.length === 0 ? '#94a3b8' : '#0a0a0a',
+                                    border: 'none',
+                                    borderRadius: '0.47rem',
+                                    cursor: carrito.length === 0 ? 'not-allowed' : 'pointer',
+                                    fontWeight: 'bold'
                                 }}
-                                className="btn-login"
-                                style={{ flex: 1 }}
                             >
-                                APLICAR
+                                💾 FINALIZAR VENTA
                             </button>
                             <button
-                                onClick={() => setAjusteData(null)}
-                                style={{ flex: 1, padding: '0.5rem', background: 'transparent', border: '1px solid #1e293b', borderRadius: '0.5rem', color: '#94a3b8', cursor: 'pointer' }}
+                                onClick={() => {
+                                    setShowModal(false);
+                                    setCarrito([]);
+                                    setEfectivo(null);
+                                    setTransferencia(null);
+                                    setNotas('');
+                                    setSelectedProduct(null);
+                                }}
+                                style={{
+                                    flex: 1,
+                                    padding: '0.6rem',
+                                    background: 'transparent',
+                                    border: '1px solid #1e293b',
+                                    borderRadius: '0.47rem',
+                                    color: '#94a3b8',
+                                    cursor: 'pointer',
+                                    fontSize: '0.8rem'
+                                }}
                             >
-                                CANCELAR
+                                ❌ CANCELAR
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Modal de Detalle de Venta */}
-            {showDetailModal && selectedVenta && (
-                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-                    <div style={{ background: '#0a0a0a', border: '1px solid #00ff88', borderRadius: '0.9rem', padding: '1.8rem', width: '90%', maxWidth: '550px', maxHeight: '80vh', overflow: 'auto' }}>
-                        <h3 style={{ color: '#00ff88', marginBottom: '0.9rem', fontSize: '1.12rem' }}>📄 DETALLE DE VENTA #{selectedVenta.id}</h3>
-                        
-                        <div style={{ marginBottom: '0.9rem', padding: '0.9rem', background: '#111', borderRadius: '0.45rem' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                                <span style={{ color: '#64748b', fontSize: '0.7rem' }}>FECHA:</span>
-                                <span style={{ color: 'white', fontSize: '0.75rem' }}>{new Date(selectedVenta.created_at).toLocaleString()}</span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                                <span style={{ color: '#64748b', fontSize: '0.7rem' }}>VENDEDOR:</span>
-                                <span style={{ color: 'white', fontSize: '0.75rem' }}>{getNombreVendedor(selectedVenta)}</span>
-                            </div>
-                            {isAdmin && (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                                    <span style={{ color: '#64748b', fontSize: '0.7rem' }}>SEDE:</span>
-                                    <span style={{ color: '#00ff88', fontSize: '0.75rem' }}>{selectedVenta.sede_nombre || `Sede ${selectedVenta.sede_id}`}</span>
-                                </div>
-                            )}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                                <span style={{ color: '#64748b', fontSize: '0.7rem' }}>MÉTODO DE PAGO:</span>
-                                <span style={{ color: getMetodoPagoColor(selectedVenta.metodo_pago), fontSize: '0.75rem' }}>
-                                    {getMetodoPagoIcon(selectedVenta.metodo_pago)} {selectedVenta.metodo_pago === 'efectivo' ? 'Efectivo' : 'Transferencia'}
-                                </span>
-                            </div>
-                            {selectedVenta.notas && (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                                    <span style={{ color: '#64748b', fontSize: '0.7rem' }}>NOTAS:</span>
-                                    <span style={{ color: 'white', fontSize: '0.75rem' }}>{selectedVenta.notas}</span>
-                                </div>
-                            )}
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <span style={{ color: '#64748b', fontSize: '0.7rem' }}>ESTADO:</span>
-                                <span style={{ color: selectedVenta.anulada ? '#ff4444' : '#00ff88', fontSize: '0.75rem' }}>
-                                    {selectedVenta.anulada ? '❌ ANULADA' : '✅ ACTIVA'}
-                                </span>
-                            </div>
+            {/* Modal de Detalles de Venta */}
+            {showDetallesModal && ventaSeleccionada && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0,0,0,0.95)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 1000,
+                    overflow: 'auto'
+                }}>
+                    <div style={{
+                        background: '#0a0a0a',
+                        border: '1px solid #00ff88',
+                        borderRadius: '0.95rem',
+                        padding: '1.9rem',
+                        width: '90%',
+                        maxWidth: '700px',
+                        maxHeight: '85vh',
+                        overflow: 'auto'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h3 style={{ color: '#00ff88' }}>📄 DETALLES DE VENTA #{ventaSeleccionada.id}</h3>
+                            <button
+                                onClick={() => {
+                                    setShowDetallesModal(false);
+                                    setVentaSeleccionada(null);
+                                    setDetallesVenta([]);
+                                }}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: '#94a3b8',
+                                    fontSize: '1.5rem',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                ✕
+                            </button>
                         </div>
 
-                        <h4 style={{ color: '#64748b', fontSize: '0.7rem', marginBottom: '0.45rem' }}>PRODUCTOS:</h4>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '0.9rem' }}>
-                            <thead>
-                                <tr style={{ borderBottom: '1px solid #1a1a1a' }}>
-                                    <th style={{ padding: '0.45rem', textAlign: 'left', color: '#64748b', fontSize: '0.6rem' }}>PRODUCTO</th>
-                                    <th style={{ padding: '0.45rem', textAlign: 'center', color: '#64748b', fontSize: '0.6rem' }}>CANT</th>
-                                    <th style={{ padding: '0.45rem', textAlign: 'right', color: '#64748b', fontSize: '0.6rem' }}>P. UNIT</th>
-                                    <th style={{ padding: '0.45rem', textAlign: 'right', color: '#64748b', fontSize: '0.6rem' }}>SUBTOTAL</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {selectedVenta.detalles && selectedVenta.detalles.length > 0 ? (
-                                    selectedVenta.detalles.map((detalle, idx) => (
-                                        <tr key={idx} style={{ borderBottom: '1px solid #1a1a1a' }}>
-                                            <td style={{ padding: '0.45rem', fontSize: '0.7rem' }}>
-                                                {detalle.nombre_producto}
-                                                {detalle.precio_original && detalle.precio_original !== detalle.precio_unit && (
-                                                    <div style={{ fontSize: '0.6rem', color: '#ffaa00' }}>
-                                                        (Ajustado de ${detalle.precio_original.toLocaleString()})
-                                                    </div>
-                                                )}
-                                            </td>
-                                            <td style={{ padding: '0.45rem', textAlign: 'center', fontSize: '0.7rem' }}>{detalle.cantidad}</td>
-                                            <td style={{ padding: '0.45rem', textAlign: 'right', fontSize: '0.7rem' }}>${detalle.precio_unit.toLocaleString()}</td>
-                                            <td style={{ padding: '0.45rem', textAlign: 'right', fontSize: '0.7rem', color: '#00ff88' }}>${detalle.subtotal.toLocaleString()}</td>
-                                        </tr>
-                                    ))
-                                ) : (
-                                    <tr>
-                                        <td colSpan={4} style={{ textAlign: 'center', padding: '1rem', color: '#64748b' }}>
-                                            No hay detalles disponibles
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                            <tfoot>
-                                <tr style={{ borderTop: '1px solid #1a1a1a' }}>
-                                    <td colSpan={3} style={{ padding: '0.45rem', textAlign: 'right', fontWeight: 'bold' }}>TOTAL:</td>
-                                    <td style={{ padding: '0.45rem', textAlign: 'right', fontSize: '0.9rem', fontWeight: 'bold', color: '#00ff88' }}>${selectedVenta.total.toLocaleString()}</td>
-                                </tr>
-                            </tfoot>
-                        </table>
+                        {loadingDetalles ? (
+                            <div style={{ textAlign: 'center', padding: '2rem', color: '#00ff88' }}>
+                                CARGANDO DETALLES...
+                            </div>
+                        ) : (
+                            <>
+                                {/* Información de la venta */}
+                                <div style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '1fr 1fr',
+                                    gap: '0.5rem',
+                                    background: '#1a1a1a',
+                                    padding: '1rem',
+                                    borderRadius: '0.47rem',
+                                    marginBottom: '1rem'
+                                }}>
+                                    <div>
+                                        <span style={{ color: '#64748b', fontSize: '0.7rem' }}>FECHA</span>
+                                        <p style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>
+                                            {formatearFecha(ventaSeleccionada.created_at)}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <span style={{ color: '#64748b', fontSize: '0.7rem' }}>TOTAL</span>
+                                        <p style={{ color: '#00ff88', fontSize: '0.85rem', fontWeight: 'bold' }}>
+                                            ${ventaSeleccionada.total.toLocaleString()}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <span style={{ color: '#64748b', fontSize: '0.7rem' }}>MÉTODO DE PAGO</span>
+                                        <p style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>
+                                            {ventaSeleccionada.metodo_pago.toUpperCase()}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <span style={{ color: '#64748b', fontSize: '0.7rem' }}>ESTADO</span>
+                                        <p style={{
+                                            color: ventaSeleccionada.anulada ? '#ff4444' : '#00ff88',
+                                            fontSize: '0.85rem'
+                                        }}>
+                                            {ventaSeleccionada.anulada ? '❌ ANULADA' : '✅ ACTIVA'}
+                                        </p>
+                                    </div>
+                                    {ventaSeleccionada.efectivo !== null && (
+                                        <div>
+                                            <span style={{ color: '#64748b', fontSize: '0.7rem' }}>EFECTIVO</span>
+                                            <p style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>
+                                                ${ventaSeleccionada.efectivo?.toLocaleString()}
+                                            </p>
+                                        </div>
+                                    )}
+                                    {ventaSeleccionada.transferencia !== null && (
+                                        <div>
+                                            <span style={{ color: '#64748b', fontSize: '0.7rem' }}>TRANSFERENCIA</span>
+                                            <p style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>
+                                                ${ventaSeleccionada.transferencia?.toLocaleString()}
+                                            </p>
+                                        </div>
+                                    )}
+                                    {ventaSeleccionada.motivo_anulacion && (
+                                        <div style={{ gridColumn: '1 / -1' }}>
+                                            <span style={{ color: '#ff4444', fontSize: '0.7rem' }}>MOTIVO DE ANULACIÓN</span>
+                                            <p style={{ color: '#ff4444', fontSize: '0.85rem' }}>
+                                                {ventaSeleccionada.motivo_anulacion}
+                                            </p>
+                                        </div>
+                                    )}
+                                    {ventaSeleccionada.notas && (
+                                        <div style={{ gridColumn: '1 / -1' }}>
+                                            <span style={{ color: '#64748b', fontSize: '0.7rem' }}>NOTAS</span>
+                                            <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>
+                                                {ventaSeleccionada.notas}
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
 
-                        <button onClick={() => setShowDetailModal(false)} className="btn-login" style={{ width: '100%', padding: '0.45rem' }}>CERRAR</button>
+                                {/* Tabla de productos */}
+                                <h4 style={{ color: '#e2e8f0', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                                    🛒 PRODUCTOS
+                                </h4>
+                                <div style={{
+                                    border: '1px solid #1a1a1a',
+                                    borderRadius: '0.47rem',
+                                    overflow: 'auto'
+                                }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                        <thead>
+                                            <tr style={{ borderBottom: '1px solid #1a1a1a' }}>
+                                                <th style={{ padding: '0.5rem', textAlign: 'left', color: '#64748b', fontSize: '0.65rem' }}>Producto</th>
+                                                <th style={{ padding: '0.5rem', textAlign: 'right', color: '#64748b', fontSize: '0.65rem' }}>Cantidad</th>
+                                                <th style={{ padding: '0.5rem', textAlign: 'right', color: '#64748b', fontSize: '0.65rem' }}>Precio Unit.</th>
+                                                <th style={{ padding: '0.5rem', textAlign: 'right', color: '#64748b', fontSize: '0.65rem' }}>Subtotal</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {detallesVenta.map((detalle) => (
+                                                <tr key={detalle.id} style={{ borderBottom: '1px solid #1a1a1a' }}>
+                                                    <td style={{ padding: '0.5rem', fontSize: '0.75rem' }}>
+                                                        {detalle.producto?.nombre || 'Producto no encontrado'}
+                                                        <div style={{ color: '#64748b', fontSize: '0.6rem' }}>
+                                                            SKU: {detalle.producto?.sku || 'N/A'}
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: '0.5rem', textAlign: 'right', fontSize: '0.75rem' }}>
+                                                        {detalle.cantidad}
+                                                    </td>
+                                                    <td style={{ padding: '0.5rem', textAlign: 'right', fontSize: '0.75rem' }}>
+                                                        ${detalle.precio_unit.toLocaleString()}
+                                                    </td>
+                                                    <td style={{ padding: '0.5rem', textAlign: 'right', fontSize: '0.75rem', color: '#00ff88' }}>
+                                                        ${detalle.subtotal.toLocaleString()}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            <tr style={{ borderTop: '2px solid #00ff88' }}>
+                                                <td colSpan={3} style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 'bold', color: '#e2e8f0' }}>
+                                                    TOTAL
+                                                </td>
+                                                <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 'bold', color: '#00ff88' }}>
+                                                    ${ventaSeleccionada.total.toLocaleString()}
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                {/* Botones de acción */}
+                                <div style={{ display: 'flex', gap: '0.95rem', marginTop: '1rem' }}>
+                                    {puedeAnular && !ventaSeleccionada.anulada && (
+                                        <button
+                                            onClick={() => handleAnularVenta(ventaSeleccionada.id)}
+                                            style={{
+                                                flex: 1,
+                                                padding: '0.6rem',
+                                                background: '#ff4444',
+                                                color: '#0a0a0a',
+                                                border: 'none',
+                                                borderRadius: '0.47rem',
+                                                cursor: 'pointer',
+                                                fontWeight: 'bold',
+                                                fontSize: '0.8rem'
+                                            }}
+                                        >
+                                            🗑️ ANULAR VENTA
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => {
+                                            setShowDetallesModal(false);
+                                            setVentaSeleccionada(null);
+                                            setDetallesVenta([]);
+                                        }}
+                                        style={{
+                                            flex: 1,
+                                            padding: '0.6rem',
+                                            background: 'transparent',
+                                            border: '1px solid #1e293b',
+                                            borderRadius: '0.47rem',
+                                            color: '#94a3b8',
+                                            cursor: 'pointer',
+                                            fontSize: '0.8rem'
+                                        }}
+                                    >
+                                        CERRAR
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             )}
