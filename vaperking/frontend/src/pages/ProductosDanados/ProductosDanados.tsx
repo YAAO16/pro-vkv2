@@ -1,274 +1,335 @@
 import React, { useState, useEffect } from 'react';
-import useAuth from '../../hooks/useAuth';
 import apiClient from '../../api/axiosClient';
-import '../../App.css';
+import { usePermisos } from '../../hooks/usePermisos';
+import { useAuthStore } from '../../store/authStore';
 
 interface ProductoDanado {
     id: number;
     sede_id: number;
-    sede_nombre: string;
     usuario_id: number;
-    nombre_usuario: string;
     fecha: string;
     nombre_producto: string;
     cantidad: number;
-    motivo: string;
+    motivo: string | null;
     created_at: string;
     updated_at: string;
+    sede?: { nombre: string };
+    usuario?: { nombre_completo: string };
 }
 
 interface Sede {
     id: number;
     nombre: string;
-}
-
-interface Producto {
-    id: number;
-    sku: string;
-    nombre: string;
-    precio_venta: number;
+    ciudad: string;
 }
 
 const ProductosDanados: React.FC = () => {
-    const { isAdmin } = useAuth();
-    const [registros, setRegistros] = useState<ProductoDanado[]>([]);
+    const { isAdmin, tienePermiso } = usePermisos();
+    const { usuario: usuarioActual } = useAuthStore();
+    const [danados, setDanados] = useState<ProductoDanado[]>([]);
     const [sedes, setSedes] = useState<Sede[]>([]);
-    const [productos, setProductos] = useState<Producto[]>([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
-    const [editingReg, setEditingReg] = useState<ProductoDanado | null>(null);
-    const [filtros, setFiltros] = useState({ sede_id: '', fecha_inicio: '', fecha_fin: '' });
+    const [editingItem, setEditingItem] = useState<ProductoDanado | null>(null);
     const [formData, setFormData] = useState({
+        sede_id: '',
         fecha: new Date().toISOString().split('T')[0],
         nombre_producto: '',
         cantidad: 1,
         motivo: ''
     });
 
+    // Permisos
+    const puedeVer = isAdmin || tienePermiso('danados_ver');
+    const puedeCrear = isAdmin || tienePermiso('danados_crear');
+    const puedeEliminar = isAdmin || tienePermiso('danados_eliminar');
+
     useEffect(() => {
-        cargarRegistros();
-        cargarProductos();
-        if (isAdmin) {
+        if (puedeVer) {
+            cargarDanados();
             cargarSedes();
         }
-    }, [filtros]);
+    }, [puedeVer]);
 
-    const cargarSedes = async () => {
+    const cargarDanados = async () => {
         try {
-            const response = await apiClient.get('/sedes/');
-            setSedes(response.data.sedes);
+            const response = await apiClient.get('/productos-danados/');
+            setDanados(response.data);
         } catch (error) {
-            console.error('Error cargando sedes:', error);
-        }
-    };
-
-    const cargarProductos = async () => {
-        try {
-            const response = await apiClient.get('/productos/');
-            setProductos(response.data);
-        } catch (error) {
-            console.error('Error cargando productos:', error);
-        }
-    };
-
-    const cargarRegistros = async () => {
-        try {
-            const params: any = {};
-            if (filtros.sede_id) params.sede_id = filtros.sede_id;
-            if (filtros.fecha_inicio) params.fecha_inicio = filtros.fecha_inicio;
-            if (filtros.fecha_fin) params.fecha_fin = filtros.fecha_fin;
-            
-            const response = await apiClient.get('/productos-danados/', { params });
-            setRegistros(response.data);
-        } catch (error) {
-            console.error('Error cargando registros:', error);
+            console.error('Error cargando productos dañados:', error);
         } finally {
             setLoading(false);
         }
     };
 
-    const handleSubmit = async () => {
-        if (!formData.nombre_producto) {
-            alert('Selecciona un producto');
-            return;
-        }
-
+    const cargarSedes = async () => {
         try {
-            if (editingReg) {
-                await apiClient.put(`/productos-danados/${editingReg.id}`, formData);
-            } else {
-                await apiClient.post('/productos-danados/', formData);
-            }
-            setShowModal(false);
-            setEditingReg(null);
-            setFormData({ fecha: new Date().toISOString().split('T')[0], nombre_producto: '', cantidad: 1, motivo: '' });
-            cargarRegistros();
+            const response = await apiClient.get('/sedes/');
+            setSedes(response.data.sedes || []);
         } catch (error) {
-            console.error('Error guardando registro:', error);
-            alert('Error al guardar el registro');
+            console.error('Error cargando sedes:', error);
+        }
+    };
+
+    const handleSubmit = async () => {
+        try {
+            const data = {
+                sede_id: parseInt(formData.sede_id),
+                fecha: formData.fecha,
+                nombre_producto: formData.nombre_producto,
+                cantidad: parseInt(formData.cantidad.toString()),
+                motivo: formData.motivo || undefined
+            };
+
+            if (editingItem) {
+                // Editar no está implementado en el backend, pero lo dejamos por si acaso
+                // await apiClient.put(`/productos-danados/${editingItem.id}`, data);
+                alert('La edición de productos dañados no está disponible actualmente');
+                return;
+            } else {
+                await apiClient.post('/productos-danados/', data);
+                alert('✅ Producto dañado registrado correctamente');
+            }
+
+            setShowModal(false);
+            setEditingItem(null);
+            resetForm();
+            cargarDanados();
+        } catch (error: any) {
+            console.error('Error guardando producto dañado:', error);
+            alert(error.response?.data?.detail || 'Error al guardar el registro');
         }
     };
 
     const handleDelete = async (id: number) => {
-        if (confirm('¿Eliminar este registro? Esta acción no se puede deshacer.')) {
+        if (!puedeEliminar) return;
+        if (window.confirm('¿Estás seguro de que deseas eliminar este registro?')) {
             try {
                 await apiClient.delete(`/productos-danados/${id}`);
-                cargarRegistros();
-            } catch (error) {
+                alert('✅ Registro eliminado correctamente');
+                cargarDanados();
+            } catch (error: any) {
                 console.error('Error eliminando registro:', error);
-                alert('Error al eliminar el registro');
+                alert(error.response?.data?.detail || 'Error al eliminar el registro');
             }
         }
     };
 
-    if (loading) return <div style={{ textAlign: 'center', padding: '1.8rem', color: '#00ff88' }}>CARGANDO PRODUCTOS DAÑADOS...</div>;
+    const resetForm = () => {
+        setFormData({
+            sede_id: '',
+            fecha: new Date().toISOString().split('T')[0],
+            nombre_producto: '',
+            cantidad: 1,
+            motivo: ''
+        });
+    };
+
+    const openCreateModal = () => {
+        setEditingItem(null);
+        resetForm();
+        // Si el usuario es vendedor, asignar su sede automáticamente
+        if (usuarioActual?.sede_id) {
+            setFormData(prev => ({ ...prev, sede_id: usuarioActual.sede_id!.toString() }));
+        }
+        setShowModal(true);
+    };
+
+    const formatearFecha = (fecha: string) => {
+        return new Date(fecha).toLocaleDateString('es-CO', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric'
+        });
+    };
+
+    if (!puedeVer) {
+        return (
+            <div style={styles.accesoDenegado}>
+                <h3>⛔ Acceso Denegado</h3>
+                <p>No tienes permiso para ver los productos dañados.</p>
+            </div>
+        );
+    }
+
+    if (loading) {
+        return (
+            <div style={styles.loadingContainer}>
+                <div style={styles.loadingSpinner}></div>
+                <div style={styles.loadingText}>CARGANDO PRODUCTOS DAÑADOS...</div>
+            </div>
+        );
+    }
+
+    // Filtrar por sede si es vendedor
+    const danadosFiltrados = danados.filter(d => {
+        if (usuarioActual?.sede_id && !isAdmin) {
+            return d.sede_id === usuarioActual.sede_id;
+        }
+        return true;
+    });
 
     return (
-        <div style={{ padding: '0.9rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.35rem', flexWrap: 'wrap', gap: '0.9rem' }}>
-                <h2 className="section-title" style={{ fontSize: '1.28rem', marginBottom: '0' }}>🔧 PRODUCTOS DAÑADOS</h2>
-                <button onClick={() => { setEditingReg(null); setFormData({ fecha: new Date().toISOString().split('T')[0], nombre_producto: '', cantidad: 1, motivo: '' }); setShowModal(true); }} 
-                    className="btn-login" style={{ width: 'auto', padding: '0.45rem 1.35rem', fontSize: '0.76rem' }}>
-                    + REGISTRAR DAÑO
-                </button>
-            </div>
-
-            {/* Filtros */}
-            <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '0.66rem', padding: '0.9rem', marginBottom: '1.35rem' }}>
-                <div style={{ display: 'flex', gap: '0.9rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                    {isAdmin && (
-                        <div style={{ minWidth: '150px' }}>
-                            <label className="input-label" style={{ fontSize: '0.57rem' }}>SEDE</label>
-                            <select value={filtros.sede_id} onChange={(e) => setFiltros({ ...filtros, sede_id: e.target.value })} 
-                                style={{ width: '100%', padding: '0.45rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.45rem', color: 'white', fontSize: '0.76rem' }}>
-                                <option value="">Todas</option>
-                                {sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-                            </select>
-                        </div>
-                    )}
-                    <div>
-                        <label className="input-label" style={{ fontSize: '0.57rem' }}>FECHA INICIO</label>
-                        <input type="date" value={filtros.fecha_inicio} onChange={(e) => setFiltros({ ...filtros, fecha_inicio: e.target.value })} 
-                            style={{ padding: '0.45rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.45rem', color: 'white', fontSize: '0.76rem' }} />
-                    </div>
-                    <div>
-                        <label className="input-label" style={{ fontSize: '0.57rem' }}>FECHA FIN</label>
-                        <input type="date" value={filtros.fecha_fin} onChange={(e) => setFiltros({ ...filtros, fecha_fin: e.target.value })} 
-                            style={{ padding: '0.45rem', background: '#0a0a0a', border: '1px solid #1e293b', borderRadius: '0.45rem', color: 'white', fontSize: '0.76rem' }} />
-                    </div>
-                    <button onClick={() => setFiltros({ sede_id: '', fecha_inicio: '', fecha_fin: '' })} 
-                        style={{ padding: '0.45rem 0.9rem', background: 'transparent', border: '1px solid #1e293b', borderRadius: '0.45rem', color: '#94a3b8', cursor: 'pointer', fontSize: '0.76rem', height: '38px' }}>
-                        LIMPIAR
-                    </button>
+        <div style={styles.container}>
+            {/* Header */}
+            <div style={styles.header}>
+                <div>
+                    <h3 style={styles.title}>🔨 PRODUCTOS DAÑADOS</h3>
+                    <p style={styles.subtitle}>Registro de productos que han sufrido daños</p>
                 </div>
+                {puedeCrear && (
+                    <button onClick={openCreateModal} style={styles.btnPrimary}>
+                        + REGISTRAR DAÑO
+                    </button>
+                )}
             </div>
 
-            {/* Tabla de productos dañados */}
-            <div style={{ overflow: 'auto', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '0.66rem' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                        <tr style={{ borderBottom: '1px solid #1a1a1a' }}>
-                            <th style={{ padding: '0.7rem', textAlign: 'left', color: '#64748b', fontSize: '0.7rem' }}>FECHA</th>
-                            {isAdmin && <th style={{ padding: '0.7rem', textAlign: 'left', color: '#64748b', fontSize: '0.7rem' }}>SEDE</th>}
-                            <th style={{ padding: '0.7rem', textAlign: 'left', color: '#64748b', fontSize: '0.7rem' }}>PRODUCTO</th>
-                            <th style={{ padding: '0.7rem', textAlign: 'center', color: '#64748b', fontSize: '0.7rem' }}>CANTIDAD</th>
-                            <th style={{ padding: '0.7rem', textAlign: 'left', color: '#64748b', fontSize: '0.7rem' }}>MOTIVO</th>
-                            <th style={{ padding: '0.7rem', textAlign: 'center', color: '#64748b', fontSize: '0.7rem' }}>ACCIONES</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {registros.map((r) => (
-                            <tr key={r.id} style={{ borderBottom: '1px solid #1a1a1a' }}>
-                                <td style={{ padding: '0.7rem', fontSize: '0.76rem' }}>{new Date(r.fecha).toLocaleDateString()}</td>
-                                {isAdmin && <td style={{ padding: '0.7rem', fontSize: '0.76rem', color: '#00ff88' }}>{r.sede_nombre}</td>}
-                                <td style={{ padding: '0.7rem', fontSize: '0.76rem' }}>{r.nombre_producto}</td>
-                                <td style={{ padding: '0.7rem', textAlign: 'center', fontSize: '0.76rem', color: '#ff4444' }}>{r.cantidad}</td>
-                                <td style={{ padding: '0.7rem', fontSize: '0.76rem', color: '#94a3b8' }}>{r.motivo || '-'}</td>
-                                <td style={{ padding: '0.7rem', textAlign: 'center' }}>
-                                    {(isAdmin || r.usuario_id === 0) && (
-                                        <button onClick={() => { 
-                                            setEditingReg(r); 
-                                            setFormData({ 
-                                                fecha: r.fecha, 
-                                                nombre_producto: r.nombre_producto, 
-                                                cantidad: r.cantidad, 
-                                                motivo: r.motivo || '' 
-                                            }); 
-                                            setShowModal(true); 
-                                        }} 
-                                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem', marginRight: '0.5rem' }} 
-                                            title="Editar">
-                                            ✏️
-                                        </button>
-                                    )}
-                                    {isAdmin && (
-                                        <button onClick={() => handleDelete(r.id)} 
-                                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem', color: '#ff4444' }} 
-                                            title="Eliminar">
-                                            🗑️
-                                        </button>
-                                    )}
-                                </td>
+            {/* Tabla */}
+            <div style={styles.tableContainer}>
+                {danadosFiltrados.length === 0 ? (
+                    <div style={styles.emptyState}>No hay productos dañados registrados</div>
+                ) : (
+                    <table style={styles.table}>
+                        <thead>
+                            <tr style={styles.tableHeader}>
+                                <th style={styles.th}>ID</th>
+                                <th style={styles.th}>Sede</th>
+                                <th style={styles.th}>Fecha</th>
+                                <th style={styles.th}>Producto</th>
+                                <th style={styles.th}>Cantidad</th>
+                                <th style={styles.th}>Motivo</th>
+                                <th style={styles.th}>Registrado por</th>
+                                {puedeEliminar && <th style={styles.th}>Acciones</th>}
                             </tr>
-                        ))}
-                        {registros.length === 0 && (
-                            <tr>
-                                <td colSpan={isAdmin ? 6 : 5} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
-                                    No hay registros de productos dañados
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {danadosFiltrados.map((d) => (
+                                <tr key={d.id} style={styles.tableRow}>
+                                    <td style={styles.td}>{d.id}</td>
+                                    <td style={styles.td}>
+                                        {d.sede?.nombre || `Sede ${d.sede_id}`}
+                                    </td>
+                                    <td style={styles.td}>{formatearFecha(d.fecha)}</td>
+                                    <td style={styles.td}>
+                                        <strong style={{ color: '#e2e8f0' }}>{d.nombre_producto}</strong>
+                                    </td>
+                                    <td style={{ ...styles.td, textAlign: 'center' }}>
+                                        <span style={styles.cantidadBadge}>{d.cantidad}</span>
+                                    </td>
+                                    <td style={styles.td}>{d.motivo || '—'}</td>
+                                    <td style={styles.td}>
+                                        {d.usuario?.nombre_completo || `Usuario ${d.usuario_id}`}
+                                    </td>
+                                    {puedeEliminar && (
+                                        <td style={styles.td}>
+                                            <button
+                                                onClick={() => handleDelete(d.id)}
+                                                style={{ ...styles.actionBtn, ...styles.actionDelete }}
+                                                title="Eliminar registro"
+                                            >
+                                                🗑️
+                                            </button>
+                                        </td>
+                                    )}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
             </div>
 
-            {/* Modal Nuevo/Editar Registro */}
+            {/* Modal de Registro */}
             {showModal && (
-                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-                    <div style={{ background: '#0a0a0a', border: '1px solid #00ff88', borderRadius: '0.9rem', padding: '1.8rem', width: '90%', maxWidth: '500px' }}>
-                        <h3 style={{ color: '#00ff88', marginBottom: '0.9rem' }}>{editingReg ? '✏️ EDITAR REGISTRO' : '➕ REGISTRAR PRODUCTO DAÑADO'}</h3>
-                        
-                        <div style={{ marginBottom: '0.9rem' }}>
-                            <label className="input-label">FECHA</label>
-                            <input type="date" value={formData.fecha} onChange={(e) => setFormData({ ...formData, fecha: e.target.value })} 
-                                className="input-field" style={{ padding: '0.45rem', fontSize: '0.8rem' }} />
-                        </div>
-                        
-                        <div style={{ marginBottom: '0.9rem' }}>
-                            <label className="input-label">PRODUCTO</label>
-                            <select 
-                                value={formData.nombre_producto} 
-                                onChange={(e) => setFormData({ ...formData, nombre_producto: e.target.value })} 
-                                className="input-field" 
-                                style={{ padding: '0.45rem', fontSize: '0.8rem' }}
+                <div style={styles.modalOverlay}>
+                    <div style={styles.modalContent}>
+                        <div style={styles.modalHeader}>
+                            <h3 style={styles.modalTitle}>➕ REGISTRAR PRODUCTO DAÑADO</h3>
+                            <button
+                                onClick={() => {
+                                    setShowModal(false);
+                                    setEditingItem(null);
+                                }}
+                                style={styles.modalClose}
                             >
-                                <option value="">Seleccionar producto...</option>
-                                {productos.map(p => (
-                                    <option key={p.id} value={p.nombre}>{p.sku} - {p.nombre}</option>
-                                ))}
-                            </select>
-                        </div>
-                        
-                        <div style={{ marginBottom: '0.9rem' }}>
-                            <label className="input-label">CANTIDAD</label>
-                            <input type="number" value={formData.cantidad} onChange={(e) => setFormData({ ...formData, cantidad: parseInt(e.target.value) })} 
-                                className="input-field" min="1" style={{ padding: '0.45rem', fontSize: '0.8rem' }} />
-                        </div>
-                        
-                        <div style={{ marginBottom: '0.9rem' }}>
-                            <label className="input-label">MOTIVO (OPCIONAL)</label>
-                            <textarea value={formData.motivo} onChange={(e) => setFormData({ ...formData, motivo: e.target.value })} 
-                                className="input-field" rows={3} placeholder="Ej: Producto llegó dañado del proveedor..."
-                                style={{ padding: '0.45rem', fontSize: '0.8rem' }} />
-                        </div>
-                        
-                        <div style={{ display: 'flex', gap: '0.9rem' }}>
-                            <button onClick={handleSubmit} className="btn-login" style={{ flex: 1, padding: '0.45rem', fontSize: '0.76rem' }}>
-                                {editingReg ? 'ACTUALIZAR' : 'REGISTRAR'}
+                                ✕
                             </button>
-                            <button onClick={() => { setShowModal(false); setEditingReg(null); }} 
-                                style={{ flex: 1, padding: '0.45rem', background: 'transparent', border: '1px solid #1e293b', borderRadius: '0.45rem', color: '#94a3b8', cursor: 'pointer', fontSize: '0.76rem' }}>
+                        </div>
+
+                        <div style={styles.modalBody}>
+                            <div style={styles.formGroup}>
+                                <label style={styles.formLabel}>SEDE *</label>
+                                <select
+                                    value={formData.sede_id}
+                                    onChange={(e) => setFormData({ ...formData, sede_id: e.target.value })}
+                                    style={styles.formSelect}
+                                    required
+                                >
+                                    <option value="">Seleccionar sede...</option>
+                                    {sedes.map(s => (
+                                        <option key={s.id} value={s.id}>{s.nombre} ({s.ciudad})</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div style={styles.formGroup}>
+                                <label style={styles.formLabel}>FECHA *</label>
+                                <input
+                                    type="date"
+                                    value={formData.fecha}
+                                    onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
+                                    style={styles.formInput}
+                                    required
+                                />
+                            </div>
+
+                            <div style={styles.formGroup}>
+                                <label style={styles.formLabel}>NOMBRE DEL PRODUCTO *</label>
+                                <input
+                                    type="text"
+                                    value={formData.nombre_producto}
+                                    onChange={(e) => setFormData({ ...formData, nombre_producto: e.target.value })}
+                                    style={styles.formInput}
+                                    placeholder="Ej: Vaporesso XROS 3"
+                                    required
+                                />
+                            </div>
+
+                            <div style={styles.formGroup}>
+                                <label style={styles.formLabel}>CANTIDAD *</label>
+                                <input
+                                    type="number"
+                                    value={formData.cantidad}
+                                    onChange={(e) => setFormData({ ...formData, cantidad: parseInt(e.target.value) || 1 })}
+                                    style={styles.formInput}
+                                    min="1"
+                                    required
+                                />
+                            </div>
+
+                            <div style={styles.formGroup}>
+                                <label style={styles.formLabel}>MOTIVO</label>
+                                <textarea
+                                    value={formData.motivo}
+                                    onChange={(e) => setFormData({ ...formData, motivo: e.target.value })}
+                                    style={styles.formTextarea}
+                                    placeholder="Ej: Golpe, defecto de fábrica, derrame, etc."
+                                    rows={3}
+                                />
+                            </div>
+                        </div>
+
+                        <div style={styles.modalFooter}>
+                            <button
+                                onClick={() => {
+                                    setShowModal(false);
+                                    setEditingItem(null);
+                                }}
+                                style={styles.btnCancel}
+                            >
                                 CANCELAR
+                            </button>
+                            <button onClick={handleSubmit} style={styles.btnSave}>
+                                REGISTRAR
                             </button>
                         </div>
                     </div>
@@ -276,6 +337,265 @@ const ProductosDanados: React.FC = () => {
             )}
         </div>
     );
+};
+
+// ============= ESTILOS =============
+const styles: { [key: string]: React.CSSProperties } = {
+    container: {
+        padding: '0.5rem',
+        maxWidth: '1200px',
+        margin: '0 auto',
+    },
+    loadingContainer: {
+        display: 'flex',
+        flexDirection: 'column' as const,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '3rem',
+        gap: '1rem',
+    },
+    loadingSpinner: {
+        width: '40px',
+        height: '40px',
+        border: '3px solid #1a1a1a',
+        borderTop: '3px solid #00ff88',
+        borderRadius: '50%',
+        animation: 'spin 1s linear infinite',
+    },
+    loadingText: {
+        color: '#00ff88',
+        fontSize: '1.2rem',
+        letterSpacing: '2px',
+    },
+    header: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: '1.5rem',
+        flexWrap: 'wrap',
+        gap: '1rem',
+    },
+    title: {
+        color: '#00ff88',
+        fontSize: '1.3rem',
+        margin: 0,
+    },
+    subtitle: {
+        color: '#64748b',
+        fontSize: '0.8rem',
+        margin: '0.25rem 0 0 0',
+    },
+    btnPrimary: {
+        background: '#00ff88',
+        color: '#0a0a0a',
+        border: 'none',
+        padding: '0.5rem 1rem',
+        borderRadius: '0.47rem',
+        cursor: 'pointer',
+        fontWeight: 'bold',
+        fontSize: '0.8rem',
+    },
+    tableContainer: {
+        overflow: 'auto',
+        border: '1px solid #1a1a1a',
+        borderRadius: '0.95rem',
+        background: '#0f0f0f',
+    },
+    table: {
+        width: '100%',
+        borderCollapse: 'collapse',
+        fontSize: '0.8rem',
+    },
+    tableHeader: {
+        borderBottom: '1px solid #1a1a1a',
+        background: '#0a0a0a',
+    },
+    th: {
+        padding: '0.7rem 0.7rem',
+        textAlign: 'left',
+        color: '#64748b',
+        fontSize: '0.65rem',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+        fontWeight: '600',
+        position: 'sticky',
+        top: 0,
+        background: '#0a0a0a',
+        zIndex: 1,
+    },
+    td: {
+        padding: '0.5rem 0.7rem',
+        borderBottom: '1px solid #1a1a1a',
+        fontSize: '0.75rem',
+        verticalAlign: 'middle',
+    },
+    tableRow: {
+        transition: 'background 0.2s ease',
+    },
+    emptyState: {
+        padding: '2rem',
+        textAlign: 'center',
+        color: '#64748b',
+        fontSize: '0.85rem',
+    },
+    cantidadBadge: {
+        background: 'rgba(255, 170, 0, 0.15)',
+        color: '#ffaa00',
+        padding: '0.15rem 0.5rem',
+        borderRadius: '0.23rem',
+        fontSize: '0.65rem',
+        fontWeight: '600',
+        display: 'inline-block',
+    },
+    actionBtn: {
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        fontSize: '0.9rem',
+        padding: '0.25rem',
+        transition: 'transform 0.2s ease',
+        margin: '0 0.15rem',
+    },
+    actionDelete: {
+        color: '#ff4444',
+    },
+    modalOverlay: {
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0,0,0,0.85)',
+        backdropFilter: 'blur(4px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: '1rem',
+    },
+    modalContent: {
+        background: '#0f0f0f',
+        border: '1px solid #1a1a1a',
+        borderRadius: '0.95rem',
+        width: '90%',
+        maxWidth: '550px',
+        maxHeight: '90vh',
+        overflow: 'auto',
+        animation: 'fadeIn 0.3s ease',
+    },
+    modalHeader: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '1.2rem 1.5rem',
+        borderBottom: '1px solid #1a1a1a',
+        position: 'sticky',
+        top: 0,
+        background: '#0f0f0f',
+        zIndex: 1,
+    },
+    modalTitle: {
+        color: '#00ff88',
+        fontSize: '1.1rem',
+        margin: 0,
+    },
+    modalClose: {
+        background: 'none',
+        border: 'none',
+        color: '#64748b',
+        fontSize: '1.2rem',
+        cursor: 'pointer',
+        padding: '0.25rem',
+    },
+    modalBody: {
+        padding: '1.5rem',
+    },
+    modalFooter: {
+        display: 'flex',
+        justifyContent: 'flex-end',
+        gap: '0.75rem',
+        padding: '1rem 1.5rem',
+        borderTop: '1px solid #1a1a1a',
+        position: 'sticky',
+        bottom: 0,
+        background: '#0f0f0f',
+    },
+    formGroup: {
+        marginBottom: '1rem',
+    },
+    formLabel: {
+        display: 'block',
+        color: '#94a3b8',
+        fontSize: '0.7rem',
+        marginBottom: '0.25rem',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+    },
+    formInput: {
+        width: '100%',
+        padding: '0.5rem 0.7rem',
+        background: '#1a1a1a',
+        border: '1px solid #1e293b',
+        borderRadius: '0.47rem',
+        color: '#e2e8f0',
+        fontSize: '0.85rem',
+        outline: 'none',
+        transition: 'border-color 0.2s ease',
+        boxSizing: 'border-box',
+    },
+    formSelect: {
+        width: '100%',
+        padding: '0.5rem 0.7rem',
+        background: '#1a1a1a',
+        border: '1px solid #1e293b',
+        borderRadius: '0.47rem',
+        color: '#e2e8f0',
+        fontSize: '0.85rem',
+        outline: 'none',
+        transition: 'border-color 0.2s ease',
+        boxSizing: 'border-box',
+    },
+    formTextarea: {
+        width: '100%',
+        padding: '0.5rem 0.7rem',
+        background: '#1a1a1a',
+        border: '1px solid #1e293b',
+        borderRadius: '0.47rem',
+        color: '#e2e8f0',
+        fontSize: '0.85rem',
+        outline: 'none',
+        transition: 'border-color 0.2s ease',
+        resize: 'vertical',
+        fontFamily: 'inherit',
+        boxSizing: 'border-box',
+        minHeight: '60px',
+    },
+    btnCancel: {
+        padding: '0.5rem 1.5rem',
+        background: 'transparent',
+        border: '1px solid #1e293b',
+        borderRadius: '0.47rem',
+        color: '#94a3b8',
+        cursor: 'pointer',
+        fontSize: '0.8rem',
+        transition: 'all 0.2s ease',
+    },
+    btnSave: {
+        padding: '0.5rem 1.5rem',
+        background: '#00ff88',
+        color: '#0a0a0a',
+        border: 'none',
+        borderRadius: '0.47rem',
+        cursor: 'pointer',
+        fontSize: '0.8rem',
+        fontWeight: 'bold',
+        transition: 'all 0.2s ease',
+    },
+    accesoDenegado: {
+        padding: '2rem',
+        textAlign: 'center',
+        color: '#ff4444',
+    },
 };
 
 export default ProductosDanados;

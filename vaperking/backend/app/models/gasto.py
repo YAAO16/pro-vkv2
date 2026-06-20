@@ -5,7 +5,7 @@ from datetime import datetime
 
 class Gasto(Base):
     __tablename__ = "gastos"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     fecha = Column(Date, nullable=False)
     motivo = Column(String(255), nullable=False)
@@ -15,7 +15,6 @@ class Gasto(Base):
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
-    
-    # Relaciones
+
     sede = relationship("Sede", back_populates="gastos")
     usuario = relationship("Usuario", back_populates="gastos")

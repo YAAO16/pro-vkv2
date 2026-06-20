@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, date
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Venta, VentaDetalle, Producto, Usuario, Sede
-from app.models import InventarioDiario, CierreDiario, Gasto
+from app.models import InventarioDiario, CierreDiario, Gasto, MetodoPago
 
 router = APIRouter()
 
@@ -18,7 +18,7 @@ def dashboard_data(
     try:
         hoy = date.today()
         inicio_semana = hoy - timedelta(days=hoy.weekday())
-        
+
         # Ventas de hoy
         query_ventas_hoy = db.query(Venta).filter(
             func.date(Venta.created_at) == hoy,
@@ -26,14 +26,24 @@ def dashboard_data(
         )
         if sede_id:
             query_ventas_hoy = query_ventas_hoy.filter(Venta.sede_id == sede_id)
-        
+
         ventas_hoy = query_ventas_hoy.all()
         total_ventas_hoy = len(ventas_hoy)
         total_ingresos_hoy = sum(v.total for v in ventas_hoy)
-        efectivo_hoy = sum(v.efectivo or 0 for v in ventas_hoy if v.metodo_pago.value in ['efectivo', 'mixto'])
-        transferencia_hoy = sum(v.transferencia or 0 for v in ventas_hoy if v.metodo_pago.value in ['transferencia', 'mixto'])
+
+        # Usar los miembros del enum (minúsculas) para las comparaciones
+        efectivo_hoy = sum(
+            v.efectivo or 0
+            for v in ventas_hoy
+            if v.metodo_pago == MetodoPago.EFECTIVO or v.metodo_pago == MetodoPago.MIXTO
+        )
+        transferencia_hoy = sum(
+            v.transferencia or 0
+            for v in ventas_hoy
+            if v.metodo_pago == MetodoPago.TRANSFERENCIA or v.metodo_pago == MetodoPago.MIXTO
+        )
         ticket_promedio = total_ingresos_hoy / total_ventas_hoy if total_ventas_hoy > 0 else 0
-        
+
         # Ventas de la semana
         query_ventas_semana = db.query(Venta).filter(
             func.date(Venta.created_at) >= inicio_semana,
@@ -41,23 +51,23 @@ def dashboard_data(
         )
         if sede_id:
             query_ventas_semana = query_ventas_semana.filter(Venta.sede_id == sede_id)
-        
+
         ventas_semana = query_ventas_semana.all()
         total_ventas_semana = len(ventas_semana)
         total_ingresos_semana = sum(v.total for v in ventas_semana)
-        
+
         # Alertas de stock (productos con stock bajo)
         alertas_stock = db.query(Producto).filter(
             Producto.stock_minimo > 0,
             Producto.activo == True
         ).count()
-        
+
         # Último cierre
         query_cierre = db.query(CierreDiario).order_by(CierreDiario.fecha.desc())
         if sede_id:
             query_cierre = query_cierre.filter(CierreDiario.sede_id == sede_id)
         ultimo_cierre = query_cierre.first()
-        
+
         return {
             "ventas_hoy": {
                 "total_ventas": total_ventas_hoy,

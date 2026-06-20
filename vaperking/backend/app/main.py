@@ -3,18 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import (
     auth, usuarios, permisos, ventas, productos, sedes,
     reportes, inventario, gastos, cierres, observaciones,
-    productos_danados, sueldos_vendedores
+    productos_danados, sueldos_vendedores, audit_log  # ← NUEVO
 )
 import logging
 
-# Desactivar logs de SQLAlchemy y otras bibliotecas
+# Desactivar logs de SQLAlchemy
 logging.getLogger('sqlalchemy').setLevel(logging.ERROR)
 logging.getLogger('sqlalchemy.engine').setLevel(logging.ERROR)
 logging.getLogger('sqlalchemy.engine.Engine').disabled = True
-logging.getLogger('sqlalchemy.pool').setLevel(logging.ERROR)
-logging.getLogger('sqlalchemy.orm').setLevel(logging.ERROR)
-logging.getLogger('uvicorn.access').disabled = True
-logging.getLogger('uvicorn.error').disabled = True
 
 app = FastAPI(
     title="VaperKing API",
@@ -47,6 +43,7 @@ app.include_router(cierres.router, prefix="/api/v1/cierres", tags=["Cierres Diar
 app.include_router(observaciones.router, prefix="/api/v1/observaciones", tags=["Observaciones"])
 app.include_router(productos_danados.router, prefix="/api/v1/productos-danados", tags=["Productos Dañados"])
 app.include_router(sueldos_vendedores.router, prefix="/api/v1/sueldos", tags=["Sueldos Vendedores"])
+app.include_router(audit_log.router, prefix="/api/v1/audit-log", tags=["Auditoría"])  # ← NUEVO
 
 @app.get("/")
 def root():

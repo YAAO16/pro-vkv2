@@ -4,11 +4,9 @@ from sqlalchemy.orm import sessionmaker
 from app.config import settings
 import logging
 
-# Desactivar logs de SQLAlchemy
+# Desactivar logs
 logging.getLogger('sqlalchemy.engine').setLevel(logging.ERROR)
 logging.getLogger('sqlalchemy.engine.Engine').disabled = True
-logging.getLogger('sqlalchemy.pool').setLevel(logging.ERROR)
-logging.getLogger('sqlalchemy.orm').setLevel(logging.ERROR)
 
 engine = create_engine(
     settings.DATABASE_URL,
@@ -19,6 +17,14 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+
+# Importar todos los modelos para crear las tablas
+from app.models import (
+    Sede, Usuario, Permiso, Producto, Categoria,
+    Venta, VentaDetalle, InventarioDiario, CierreDiario,
+    Gasto, Observacion, ProductoDanado, SueldoVendedor,
+    Transferencia, AuditLog
+)
 
 def get_db():
     db = SessionLocal()

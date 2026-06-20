@@ -1,12 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
-import { usePermisos } from '../../context/PermisosContext';
+import { usePermisos } from '../../hooks/usePermisos';
 import apiClient from '../../api/axiosClient';
 import Usuarios from '../Usuarios/Usuarios';
 import Ventas from '../Ventas/Ventas';
 import Productos from '../Productos/Productos';
+import Historial from '../Historial/Historial';
+import Sueldos from '../Sueldos/Sueldos';
+import Sedes from '../Sedes/Sedes';
+import Reportes from '../Reportes/Reportes';
+import ProductosDanados from '../ProductosDanados/ProductosDanados';
+import Observaciones from '../Observaciones/Observaciones';
+import Cierres from '../Cierres/Cierres';
+import Gastos from '../Gastos/Gastos';
+import Inventario from '../Inventario/Inventario';
 
+// ============ INTERFACES ============
 interface MenuItem {
     id: string;
     label: string;
@@ -32,13 +42,41 @@ interface DashboardData {
     };
 }
 
+// ============ DASHBOARD PRINCIPAL ============
 const Dashboard: React.FC = () => {
     const navigate = useNavigate();
     const { usuario, isAuthenticated, logout } = useAuthStore();
-    const { isAdmin, isVendedor, loading: loadingPermisos } = usePermisos();
+    const { isAdmin, isVendedor, tienePermiso, loading: loadingPermisos, permisos } = usePermisos();
     const [activeMenu, setActiveMenu] = useState('dashboard');
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [currentTime, setCurrentTime] = useState(new Date());
+    const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+    const [ultimasVentas, setUltimasVentas] = useState<any[]>([]);
+    const [loadingDashboard, setLoadingDashboard] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    // ============ LOGS DE DEPURACIÓN ============
+    useEffect(() => {
+        console.log('===== DASHBOARD DEBUG =====');
+        console.log('isAdmin:', isAdmin);
+        console.log('isVendedor:', isVendedor);
+        console.log('loadingPermisos:', loadingPermisos);
+        console.log('Permisos cargados:', permisos);
+        console.log('Usuario:', usuario?.username, 'Rol:', usuario?.rol);
+        
+        if (permisos.length > 0) {
+            console.log('Permisos disponibles:', permisos);
+            console.log('tienePermiso("ventas_ver"):', tienePermiso('ventas_ver'));
+            console.log('tienePermiso("productos_ver"):', tienePermiso('productos_ver'));
+            console.log('tienePermiso("inventario_ver"):', tienePermiso('inventario_ver'));
+            console.log('tienePermiso("gastos_ver"):', tienePermiso('gastos_ver'));
+            console.log('tienePermiso("cierres_ver"):', tienePermiso('cierres_ver'));
+            console.log('tienePermiso("observaciones_ver"):', tienePermiso('observaciones_ver'));
+            console.log('tienePermiso("danados_ver"):', tienePermiso('danados_ver'));
+            console.log('tienePermiso("reportes_ver"):', tienePermiso('reportes_ver'));
+        }
+        console.log('===========================');
+    }, [permisos, isAdmin, isVendedor, loadingPermisos, usuario]);
 
     // Reloj en tiempo real
     useEffect(() => {
@@ -54,32 +92,190 @@ const Dashboard: React.FC = () => {
         }
     }, [isAuthenticated, navigate, loadingPermisos]);
 
+    useEffect(() => {
+        if (isAuthenticated) {
+            cargarDashboard();
+            cargarUltimasVentas();
+        }
+    }, [isAuthenticated]);
+
+    const cargarDashboard = async () => {
+        try {
+            setLoadingDashboard(true);
+            setError(null);
+            
+            const sedeId = isVendedor && usuario?.sede_id ? usuario.sede_id : null;
+            const url = sedeId ? `/reportes/dashboard?sede_id=${sedeId}` : '/reportes/dashboard';
+            
+            const response = await apiClient.get(url);
+            if (response.status === 200) {
+                setDashboardData(response.data);
+            }
+        } catch (error: any) {
+            console.error('Error cargando dashboard:', error);
+            setError(error.response?.data?.detail || 'Error al cargar los datos');
+        } finally {
+            setLoadingDashboard(false);
+        }
+    };
+
+    const cargarUltimasVentas = async () => {
+        try {
+            const params: any = { limit: 5 };
+            if (isVendedor && usuario?.sede_id) {
+                params.sede_id = usuario.sede_id;
+            }
+            
+            const response = await apiClient.get('/ventas/', { params });
+            if (response.status === 200) {
+                setUltimasVentas(response.data.ventas || []);
+            }
+        } catch (error) {
+            console.error('Error cargando últimas ventas:', error);
+        }
+    };
+
+    // Si está cargando permisos o no autenticado, mostrar loading
     if (!isAuthenticated || loadingPermisos) {
-        return null;
+        return (
+            <div style={{ 
+                display: 'flex', 
+                justifyContent: 'center', 
+                alignItems: 'center', 
+                height: '100vh',
+                background: '#080808',
+                color: '#00ff88',
+                fontSize: '1.2rem',
+                letterSpacing: '2px'
+            }}>
+                CARGANDO SISTEMA...
+            </div>
+        );
     }
 
-    const menuItems: MenuItem[] = [
-        { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-        { id: 'ventas', label: 'Ventas', icon: '💰' },
-        { id: 'productos', label: 'Productos', icon: '🏷️' },
-    ];
+    // ============ CONSTRUIR MENÚ SEGÚN PERMISOS ============
+    const menuItems: MenuItem[] = [];
 
+    // Dashboard siempre visible
+    menuItems.push({ id: 'dashboard', label: 'Dashboard', icon: '📊' });
+
+    console.log('🔧 Construyendo menú con permisos...');
+
+    // Ventas
+    if (tienePermiso('ventas_ver')) {
+        console.log('✅ Agregando: Ventas');
+        menuItems.push({ id: 'ventas', label: 'Ventas', icon: '💰' });
+    } else {
+        console.log('❌ Ventas: NO');
+    }
+
+    // Productos
+    if (tienePermiso('productos_ver')) {
+        console.log('✅ Agregando: Productos');
+        menuItems.push({ id: 'productos', label: 'Productos', icon: '🏷️' });
+    } else {
+        console.log('❌ Productos: NO');
+    }
+
+    // Inventario
+    if (tienePermiso('inventario_ver')) {
+        console.log('✅ Agregando: Inventario');
+        menuItems.push({ id: 'inventario', label: 'Inventario', icon: '📦' });
+    } else {
+        console.log('❌ Inventario: NO');
+    }
+
+    // Gastos
+    if (tienePermiso('gastos_ver')) {
+        console.log('✅ Agregando: Gastos');
+        menuItems.push({ id: 'gastos', label: 'Gastos', icon: '💸' });
+    } else {
+        console.log('❌ Gastos: NO');
+    }
+
+    // Cierres
+    if (tienePermiso('cierres_ver')) {
+        console.log('✅ Agregando: Cierres');
+        menuItems.push({ id: 'cierres', label: 'Cierres', icon: '📅' });
+    } else {
+        console.log('❌ Cierres: NO');
+    }
+
+    // Observaciones
+    if (tienePermiso('observaciones_ver')) {
+        console.log('✅ Agregando: Observaciones');
+        menuItems.push({ id: 'observaciones', label: 'Observaciones', icon: '📝' });
+    } else {
+        console.log('❌ Observaciones: NO');
+    }
+
+    // Productos Dañados
+    if (tienePermiso('danados_ver')) {
+        console.log('✅ Agregando: Dañados');
+        menuItems.push({ id: 'danados', label: 'Dañados', icon: '🔨' });
+    } else {
+        console.log('❌ Dañados: NO');
+    }
+
+    // Reportes
+    if (tienePermiso('reportes_ver')) {
+        console.log('✅ Agregando: Reportes');
+        menuItems.push({ id: 'reportes', label: 'Reportes', icon: '📈' });
+    } else {
+        console.log('❌ Reportes: NO');
+    }
+
+    // Módulos exclusivos de ADMIN
     if (isAdmin) {
+        console.log('✅ Agregando módulos de admin');
         menuItems.push({ id: 'usuarios', label: 'Usuarios', icon: '👥' });
         menuItems.push({ id: 'sedes', label: 'Sedes', icon: '🏢' });
-        menuItems.push({ id: 'reportes', label: 'Reportes', icon: '📈' });
+        menuItems.push({ id: 'sueldos', label: 'Sueldos', icon: '💰' });
+        menuItems.push({ id: 'historial', label: 'Historial', icon: '📜' });
     }
+
+    console.log('📋 Menú final:', menuItems.map(m => `${m.icon} ${m.label}`));
 
     const renderContent = () => {
         switch (activeMenu) {
             case 'dashboard':
-                return <DashboardContent usuario={usuario} isAdmin={isAdmin} isVendedor={isVendedor} currentTime={currentTime} />;
+                return (
+                    <DashboardContent 
+                        usuario={usuario} 
+                        isAdmin={isAdmin} 
+                        isVendedor={isVendedor} 
+                        currentTime={currentTime}
+                        dashboardData={dashboardData}
+                        ultimasVentas={ultimasVentas}
+                        loading={loadingDashboard}
+                        error={error}
+                        onRetry={cargarDashboard}
+                    />
+                );
             case 'ventas':
                 return <Ventas />;
             case 'productos':
                 return <Productos isAdmin={isAdmin} />;
+            case 'inventario':
+                return <Inventario />;
+            case 'gastos':
+                return <Gastos />;
+            case 'cierres':
+                return <Cierres />;   // ← Sin props
+            case 'observaciones':
+                return <Observaciones />;
+            case 'danados':
+                return <ProductosDanados />;
+            case 'reportes':
+                return <Reportes />;
             case 'usuarios':
                 return <Usuarios />;
+            case 'sedes':
+                return <Sedes />;
+            case 'sueldos':
+                return <Sueldos />;
+            case 'historial':
+                return <Historial />;
             default:
                 return <div style={{ color: '#64748b', textAlign: 'center', padding: '2rem' }}>Módulo en construcción</div>;
         }
@@ -211,71 +407,30 @@ const Dashboard: React.FC = () => {
     );
 };
 
-// Componente de contenido del Dashboard - CON DATOS REALES
-// Componente de contenido del Dashboard - CON DATOS REALES
-const DashboardContent: React.FC<{ 
-    usuario: any; 
-    isAdmin: boolean; 
-    isVendedor: boolean; 
-    currentTime: Date 
-}> = ({ usuario, isAdmin, isVendedor, currentTime }) => {
-    const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [ultimasVentas, setUltimasVentas] = useState<any[]>([]);
 
-    useEffect(() => {
-        cargarDashboard();
-        cargarUltimasVentas();
-    }, []);
+interface DashboardContentProps {
+    usuario: any;
+    isAdmin: boolean;
+    isVendedor: boolean;
+    currentTime: Date;
+    dashboardData: DashboardData | null;
+    ultimasVentas: any[];
+    loading: boolean;
+    error: string | null;
+    onRetry: () => void;
+}
 
-    const cargarDashboard = async () => {
-        try {
-            setLoading(true);
-            setError(null);
-            
-            const sedeId = isVendedor && usuario?.sede_id ? usuario.sede_id : null;
-            const url = sedeId ? `/reportes/dashboard?sede_id=${sedeId}` : '/reportes/dashboard';
-            
-            console.log('Cargando dashboard desde:', url);
-            const response = await apiClient.get(url);
-            
-            if (response.status === 200) {
-                setDashboardData(response.data);
-                console.log('Dashboard data:', response.data);
-            } else {
-                throw new Error('Error al cargar datos del dashboard');
-            }
-        } catch (error: any) {
-            console.error('Error cargando dashboard:', error);
-            setError(error.response?.data?.detail || 'Error al cargar los datos');
-            setDashboardData({
-                ventas_hoy: { total_ventas: 0, total_ingresos: 0, efectivo: 0, transferencia: 0, ticket_promedio: 0 },
-                ventas_semana: { total_ventas: 0, total_ingresos: 0 },
-                alertas_stock: 0,
-                ultimo_cierre: { fecha: null, diferencia: 0 }
-            });
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const cargarUltimasVentas = async () => {
-        try {
-            const params: any = { limit: 5 };
-            if (isVendedor && usuario?.sede_id) {
-                params.sede_id = usuario.sede_id;
-            }
-            
-            const response = await apiClient.get('/ventas/', { params });
-            if (response.status === 200) {
-                setUltimasVentas(response.data.ventas || []);
-            }
-        } catch (error) {
-            console.error('Error cargando últimas ventas:', error);
-        }
-    };
-
+const DashboardContent: React.FC<DashboardContentProps> = ({
+    usuario,
+    isAdmin,
+    isVendedor,
+    currentTime,
+    dashboardData,
+    ultimasVentas,
+    loading,
+    error,
+    onRetry
+}) => {
     const formatearMoneda = (valor: number) => {
         return valor.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     };
@@ -303,7 +458,7 @@ const DashboardContent: React.FC<{
             <div style={styles.errorContainer}>
                 <div style={styles.errorIcon}>⚠️</div>
                 <div style={styles.errorText}>{error}</div>
-                <button onClick={cargarDashboard} style={styles.errorButton}>
+                <button onClick={onRetry} style={styles.errorButton}>
                     Reintentar
                 </button>
             </div>
@@ -315,9 +470,6 @@ const DashboardContent: React.FC<{
 
     const metaDiaria = 5000000;
     const progresoMeta = Math.min((data.ventas_hoy.total_ingresos / metaDiaria) * 100, 100);
-    const totalPagos = data.ventas_hoy.efectivo + data.ventas_hoy.transferencia;
-    const porcentajeEfectivo = totalPagos > 0 ? (data.ventas_hoy.efectivo / totalPagos) * 100 : 0;
-    const porcentajeTransferencia = totalPagos > 0 ? (data.ventas_hoy.transferencia / totalPagos) * 100 : 0;
 
     return (
         <div style={styles.dashboardContent}>
@@ -343,7 +495,7 @@ const DashboardContent: React.FC<{
                 </div>
             </div>
 
-            {/* Stats Cards - Datos reales */}
+            {/* Stats Cards */}
             <div style={styles.statsGrid}>
                 <div style={{ ...styles.statCard, borderColor: '#00ff88' }}>
                     <div style={styles.statIcon}>💰</div>
@@ -415,29 +567,6 @@ const DashboardContent: React.FC<{
                 </div>
             </div>
 
-            {/* Distribución de Pagos */}
-            <div style={styles.activitySection}>
-                <h3 style={styles.sectionTitle}>💳 Distribución de Pagos (Hoy)</h3>
-                <div style={styles.paymentDistribution}>
-                    <div style={styles.paymentBar}>
-                        <div style={{
-                            ...styles.paymentBarFill,
-                            width: `${porcentajeEfectivo}%`,
-                            background: '#00ff88'
-                        }} />
-                        <div style={{
-                            ...styles.paymentBarFill,
-                            width: `${porcentajeTransferencia}%`,
-                            background: '#00aaff'
-                        }} />
-                    </div>
-                    <div style={styles.paymentLabels}>
-                        <span style={{ color: '#00ff88' }}>💰 Efectivo: ${formatearMoneda(data.ventas_hoy.efectivo)}</span>
-                        <span style={{ color: '#00aaff' }}>💳 Transferencia: ${formatearMoneda(data.ventas_hoy.transferencia)}</span>
-                    </div>
-                </div>
-            </div>
-
             {/* Meta del Día */}
             <div style={styles.activitySection}>
                 <h3 style={styles.sectionTitle}>🎯 Meta del Día</h3>
@@ -496,6 +625,7 @@ const DashboardContent: React.FC<{
 };
 
 // ============= ESTILOS =============
+// (los estilos se mantienen igual que antes)
 
 const styles: { [key: string]: React.CSSProperties } = {
     container: {
@@ -791,8 +921,6 @@ const styles: { [key: string]: React.CSSProperties } = {
         fontSize: '0.8rem',
         transition: 'all 0.2s ease',
     },
-
-    // Dashboard Content Styles
     dashboardContent: {
         maxWidth: '1200px',
         margin: '0 auto',
@@ -932,29 +1060,6 @@ const styles: { [key: string]: React.CSSProperties } = {
         transition: 'all 0.2s ease',
         background: '#1a1a1a',
         color: '#94a3b8',
-    },
-    paymentDistribution: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.75rem',
-    },
-    paymentBar: {
-        display: 'flex',
-        height: '12px',
-        borderRadius: '6px',
-        overflow: 'hidden',
-        background: '#1a1a1a',
-    },
-    paymentBarFill: {
-        height: '100%',
-        transition: 'width 0.5s ease',
-    },
-    paymentLabels: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        fontSize: '0.75rem',
-        flexWrap: 'wrap',
-        gap: '0.5rem',
     },
     goalContainer: {
         display: 'flex',

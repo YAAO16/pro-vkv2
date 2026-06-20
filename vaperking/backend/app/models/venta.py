@@ -1,13 +1,22 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, Boolean, Text
+import enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum as SQLEnum, Boolean, Text
 from sqlalchemy.orm import relationship
 from app.database import Base
 from datetime import datetime
-import enum
 
 class MetodoPago(str, enum.Enum):
     EFECTIVO = "efectivo"
     TRANSFERENCIA = "transferencia"
     MIXTO = "mixto"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            lower = value.lower()
+            for member in cls:
+                if member.value == lower:
+                    return member
+        return None
 
 class Venta(Base):
     __tablename__ = "ventas"
@@ -16,7 +25,7 @@ class Venta(Base):
     sede_id = Column(Integer, ForeignKey("sedes.id"), nullable=False)
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     total = Column(Float, nullable=False)
-    metodo_pago = Column(Enum(MetodoPago), nullable=False)
+    metodo_pago = Column(SQLEnum(MetodoPago), nullable=False)
     efectivo = Column(Float, nullable=True)
     transferencia = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.now)

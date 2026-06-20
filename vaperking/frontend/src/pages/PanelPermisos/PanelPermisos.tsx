@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import apiClient from '../../api/axiosClient';
-import { usePermisos } from '../../context/PermisosContext';
+import { usePermisos } from '../../hooks/usePermisos';
 
 interface Permiso {
     id: number;
