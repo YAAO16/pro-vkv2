@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.dependencies import get_current_user, verify_admin
 from app.models import SueldoVendedor, Usuario, Sede
+from app.decorators import audit
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
@@ -29,7 +30,6 @@ class CrearSueldoRequest(BaseModel):
     bonificaciones: float = 0
     deducciones: float = 0
     observaciones: Optional[str] = None
-    # No se incluye estado, se usa el valor por defecto del modelo
 
 class EditarSueldoRequest(BaseModel):
     sueldo_base: Optional[float] = None
@@ -47,22 +47,58 @@ def get_sueldos(
     ano: Optional[int] = None,
     sede_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user: Usuario = Depends(get_current_user)
 ):
-    query = db.query(SueldoVendedor)
-    if mes:
-        query = query.filter(SueldoVendedor.mes == mes)
-    if ano:
-        query = query.filter(SueldoVendedor.ano == ano)
-    if sede_id:
-        query = query.filter(SueldoVendedor.sede_id == sede_id)
+    # Consulta base con eager loading de relaciones
+    query = db.query(SueldoVendedor).options(
+        joinedload(SueldoVendedor.usuario),
+        joinedload(SueldoVendedor.sede)
+    )
+
+    # Si es vendedor, forzar filtro por su sede (y opcionalmente solo sus sueldos)
+    if current_user.rol.value == "vendedor" and current_user.sede_id:
+        query = query.filter(SueldoVendedor.sede_id == current_user.sede_id)
+        # Opcional: si quieres que vea solo sus propios sueldos, descomenta:
+        # query = query.filter(SueldoVendedor.usuario_id == current_user.id)
+    else:
+        # Admin: aplicar filtros opcionales
+        if mes:
+            query = query.filter(SueldoVendedor.mes == mes)
+        if ano:
+            query = query.filter(SueldoVendedor.ano == ano)
+        if sede_id:
+            query = query.filter(SueldoVendedor.sede_id == sede_id)
+
     sueldos = query.order_by(SueldoVendedor.created_at.desc()).all()
-    return sueldos
+
+    # Enriquecer respuesta con nombres
+    result = []
+    for s in sueldos:
+        result.append({
+            "id": s.id,
+            "usuario_id": s.usuario_id,
+            "usuario_nombre": s.usuario.nombre_completo if s.usuario else "Usuario eliminado",
+            "sede_id": s.sede_id,
+            "sede_nombre": s.sede.nombre if s.sede else "Sede eliminada",
+            "mes": s.mes,
+            "ano": s.ano,
+            "sueldo_base": s.sueldo_base,
+            "comisiones": s.comisiones,
+            "bonificaciones": s.bonificaciones,
+            "deducciones": s.deducciones,
+            "total": s.total,
+            "estado": s.estado,
+            "fecha_pago": s.fecha_pago,
+            "observaciones": s.observaciones,
+            "created_at": s.created_at
+        })
+
+    return result
 
 @router.get("/vendedores")
 def get_vendedores(
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user: Usuario = Depends(get_current_user)
 ):
     vendedores = db.query(Usuario).filter(
         Usuario.rol == "vendedor",
@@ -71,85 +107,119 @@ def get_vendedores(
     return [{"id": v.id, "nombre": v.nombre_completo, "sede_id": v.sede_id} for v in vendedores]
 
 @router.post("/")
+@audit(accion="crear_sueldo", tabla="sueldos_vendedores")
 def crear_sueldo(
-    request: CrearSueldoRequest,
+    request: Request,
+    data: CrearSueldoRequest,
     db: Session = Depends(get_db),
-    current_user = Depends(verify_admin)
+    current_user: Usuario = Depends(verify_admin)
 ):
-    usuario = db.query(Usuario).filter(Usuario.id == request.usuario_id).first()
+    # Verificar usuario
+    usuario = db.query(Usuario).filter(Usuario.id == data.usuario_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    sede = db.query(Sede).filter(Sede.id == request.sede_id).first()
+
+    # Verificar sede
+    sede = db.query(Sede).filter(Sede.id == data.sede_id).first()
     if not sede:
         raise HTTPException(status_code=404, detail="Sede no encontrada")
 
+    # Verificar duplicado
     existe = db.query(SueldoVendedor).filter(
-        SueldoVendedor.usuario_id == request.usuario_id,
-        SueldoVendedor.mes == request.mes,
-        SueldoVendedor.ano == request.ano
+        SueldoVendedor.usuario_id == data.usuario_id,
+        SueldoVendedor.mes == data.mes,
+        SueldoVendedor.ano == data.ano
     ).first()
     if existe:
         raise HTTPException(status_code=400, detail="Ya existe un sueldo para este usuario en este mes")
 
-    total = request.sueldo_base + request.comisiones + request.bonificaciones - request.deducciones
+    total = data.sueldo_base + data.comisiones + data.bonificaciones - data.deducciones
     sueldo = SueldoVendedor(
-        usuario_id=request.usuario_id,
-        sede_id=request.sede_id,
-        mes=request.mes,
-        ano=request.ano,
-        sueldo_base=request.sueldo_base,
-        comisiones=request.comisiones,
-        bonificaciones=request.bonificaciones,
-        deducciones=request.deducciones,
+        usuario_id=data.usuario_id,
+        sede_id=data.sede_id,
+        mes=data.mes,
+        ano=data.ano,
+        sueldo_base=data.sueldo_base,
+        comisiones=data.comisiones,
+        bonificaciones=data.bonificaciones,
+        deducciones=data.deducciones,
         total=total,
-        observaciones=request.observaciones,
-        # estado se asigna automáticamente al valor por defecto (PENDIENTE)
+        observaciones=data.observaciones
     )
+
     db.add(sueldo)
     db.commit()
     db.refresh(sueldo)
-    return sueldo
+
+    # Devolver con nombres
+    return {
+        "id": sueldo.id,
+        "usuario_id": sueldo.usuario_id,
+        "usuario_nombre": usuario.nombre_completo,
+        "sede_id": sueldo.sede_id,
+        "sede_nombre": sede.nombre,
+        "mes": sueldo.mes,
+        "ano": sueldo.ano,
+        "sueldo_base": sueldo.sueldo_base,
+        "comisiones": sueldo.comisiones,
+        "bonificaciones": sueldo.bonificaciones,
+        "deducciones": sueldo.deducciones,
+        "total": sueldo.total,
+        "estado": sueldo.estado,
+        "fecha_pago": sueldo.fecha_pago,
+        "observaciones": sueldo.observaciones,
+        "created_at": sueldo.created_at
+    }
 
 @router.put("/{sueldo_id}")
+@audit(accion="editar_sueldo", tabla="sueldos_vendedores")
 def editar_sueldo(
+    request: Request,
     sueldo_id: int,
-    request: EditarSueldoRequest,
+    data: EditarSueldoRequest,
     db: Session = Depends(get_db),
-    current_user = Depends(verify_admin)
+    current_user: Usuario = Depends(verify_admin)
 ):
     sueldo = db.query(SueldoVendedor).filter(SueldoVendedor.id == sueldo_id).first()
     if not sueldo:
         raise HTTPException(status_code=404, detail="Sueldo no encontrado")
 
-    if request.sueldo_base is not None:
-        sueldo.sueldo_base = request.sueldo_base
-    if request.comisiones is not None:
-        sueldo.comisiones = request.comisiones
-    if request.bonificaciones is not None:
-        sueldo.bonificaciones = request.bonificaciones
-    if request.deducciones is not None:
-        sueldo.deducciones = request.deducciones
-    if request.estado is not None:
-        sueldo.estado = normalizar_estado(request.estado)
-    if request.fecha_pago is not None:
-        sueldo.fecha_pago = request.fecha_pago
-    if request.observaciones is not None:
-        sueldo.observaciones = request.observaciones
+    if data.sueldo_base is not None:
+        sueldo.sueldo_base = data.sueldo_base
+    if data.comisiones is not None:
+        sueldo.comisiones = data.comisiones
+    if data.bonificaciones is not None:
+        sueldo.bonificaciones = data.bonificaciones
+    if data.deducciones is not None:
+        sueldo.deducciones = data.deducciones
+    if data.estado is not None:
+        sueldo.estado = normalizar_estado(data.estado)
+    if data.fecha_pago is not None:
+        sueldo.fecha_pago = data.fecha_pago
+    if data.observaciones is not None:
+        sueldo.observaciones = data.observaciones
 
+    # Recalcular total
     sueldo.total = sueldo.sueldo_base + sueldo.comisiones + sueldo.bonificaciones - sueldo.deducciones
+
     db.commit()
     db.refresh(sueldo)
-    return sueldo
+
+    return {"message": "Sueldo actualizado correctamente", "sueldo": sueldo}
 
 @router.delete("/{sueldo_id}")
+@audit(accion="anular_sueldo", tabla="sueldos_vendedores")
 def eliminar_sueldo(
+    request: Request,
     sueldo_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(verify_admin)
+    current_user: Usuario = Depends(verify_admin)
 ):
     sueldo = db.query(SueldoVendedor).filter(SueldoVendedor.id == sueldo_id).first()
     if not sueldo:
         raise HTTPException(status_code=404, detail="Sueldo no encontrado")
-    sueldo.estado = "anulado"   # Mayúsculas
+
+    sueldo.estado = "anulado"
     db.commit()
+
     return {"message": "Sueldo anulado correctamente"}

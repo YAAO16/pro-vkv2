@@ -9,7 +9,6 @@ import Productos from '../Productos/Productos';
 import Historial from '../Historial/Historial';
 import Sueldos from '../Sueldos/Sueldos';
 import Sedes from '../Sedes/Sedes';
-import Reportes from '../Reportes/Reportes';
 import ProductosDanados from '../ProductosDanados/ProductosDanados';
 import Observaciones from '../Observaciones/Observaciones';
 import Cierres from '../Cierres/Cierres';
@@ -217,13 +216,6 @@ const Dashboard: React.FC = () => {
         console.log('❌ Dañados: NO');
     }
 
-    // Reportes
-    if (tienePermiso('reportes_ver')) {
-        console.log('✅ Agregando: Reportes');
-        menuItems.push({ id: 'reportes', label: 'Reportes', icon: '📈' });
-    } else {
-        console.log('❌ Reportes: NO');
-    }
 
     // Módulos exclusivos de ADMIN
     if (isAdmin) {
@@ -266,8 +258,6 @@ const Dashboard: React.FC = () => {
                 return <Observaciones />;
             case 'danados':
                 return <ProductosDanados />;
-            case 'reportes':
-                return <Reportes />;
             case 'usuarios':
                 return <Usuarios />;
             case 'sedes':

@@ -60,12 +60,25 @@ const Cierres: React.FC = () => {
     const puedeVer = isAdmin || tienePermiso('cierres_ver');
     const puedeCrear = isAdmin || tienePermiso('cierres_crear');
 
+    // Inicializar fecha actual
+    useEffect(() => {
+        const hoy = new Date().toISOString().split('T')[0];
+        setSelectedFecha(hoy);
+    }, []);
+
     useEffect(() => {
         if (puedeVer) {
             cargarCierres();
             cargarSedes();
         }
     }, [puedeVer]);
+
+    // Si es vendedor, establecer su sede automáticamente
+    useEffect(() => {
+        if (!isAdmin && usuarioActual?.sede_id) {
+            setSelectedSede(usuarioActual.sede_id);
+        }
+    }, [isAdmin, usuarioActual]);
 
     const cargarCierres = async () => {
         try {
@@ -92,10 +105,16 @@ const Cierres: React.FC = () => {
     };
 
     const handlePreview = async () => {
-        if (!selectedSede || !selectedFecha) {
-            alert('Selecciona una sede y una fecha');
+        // Validar que se haya seleccionado sede y fecha
+        if (!selectedSede) {
+            alert('Selecciona una sede');
             return;
         }
+        if (!selectedFecha) {
+            alert('Selecciona una fecha');
+            return;
+        }
+
         try {
             setPreviewLoading(true);
             setError(null);
@@ -195,14 +214,36 @@ const Cierres: React.FC = () => {
                 </div>
                 {puedeCrear && (
                     <div style={styles.headerActions}>
+                        {/* Selector de Sede (solo admin) */}
+                        {isAdmin && (
+                            <select
+                                value={selectedSede || ''}
+                                onChange={(e) => setSelectedSede(e.target.value ? parseInt(e.target.value) : null)}
+                                style={styles.filterSelect}
+                            >
+                                <option value="">Seleccionar sede...</option>
+                                {sedes.map(s => (
+                                    <option key={s.id} value={s.id}>{s.nombre} ({s.ciudad})</option>
+                                ))}
+                            </select>
+                        )}
+
+                        {/* Selector de Fecha */}
+                        <input
+                            type="date"
+                            value={selectedFecha}
+                            onChange={(e) => setSelectedFecha(e.target.value)}
+                            style={styles.filterInput}
+                        />
+
                         <button
-                            onClick={() => {
-                                setSelectedSede(usuarioActual?.sede_id || null);
-                                setSelectedFecha(new Date().toISOString().split('T')[0]);
-                                setError(null);
-                                handlePreview();
+                            onClick={handlePreview}
+                            disabled={!selectedSede || !selectedFecha}
+                            style={{
+                                ...styles.btnPrimary,
+                                opacity: (!selectedSede || !selectedFecha) ? 0.5 : 1,
+                                cursor: (!selectedSede || !selectedFecha) ? 'not-allowed' : 'pointer'
                             }}
-                            style={styles.btnPrimary}
                         >
                             📋 PREVISUALIZAR CIERRE
                         </button>
@@ -259,7 +300,7 @@ const Cierres: React.FC = () => {
             </div>
 
             {/* Modal de Previsualización */}
-            {showPreviewModal && (
+            {showPreviewModal && previewData && (
                 <div style={styles.modalOverlay}>
                     <div style={styles.modalContent}>
                         <div style={styles.modalHeader}>
@@ -373,31 +414,23 @@ const Cierres: React.FC = () => {
                         </div>
 
                         <div style={styles.modalBody}>
-                            {isAdmin && (
-                                <div style={styles.formGroup}>
-                                    <label style={styles.formLabel}>SEDE *</label>
-                                    <select
-                                        value={formData.sede_id}
-                                        onChange={(e) => setFormData({ ...formData, sede_id: e.target.value })}
-                                        style={styles.formSelect}
-                                        required
-                                    >
-                                        <option value="">Seleccionar sede...</option>
-                                        {sedes.map(s => (
-                                            <option key={s.id} value={s.id}>{s.nombre} ({s.ciudad})</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
+                            <div style={styles.formGroup}>
+                                <label style={styles.formLabel}>SEDE</label>
+                                <input
+                                    type="text"
+                                    value={sedes.find(s => s.id === parseInt(formData.sede_id))?.nombre || formData.sede_id}
+                                    style={{ ...styles.formInput, background: '#1a1a1a', cursor: 'not-allowed' }}
+                                    disabled
+                                />
+                            </div>
 
                             <div style={styles.formGroup}>
-                                <label style={styles.formLabel}>FECHA *</label>
+                                <label style={styles.formLabel}>FECHA</label>
                                 <input
-                                    type="date"
-                                    value={formData.fecha}
-                                    onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
-                                    style={styles.formInput}
-                                    required
+                                    type="text"
+                                    value={formatearFecha(formData.fecha)}
+                                    style={{ ...styles.formInput, background: '#1a1a1a', cursor: 'not-allowed' }}
+                                    disabled
                                 />
                             </div>
 
@@ -549,6 +582,8 @@ const styles: { [key: string]: React.CSSProperties } = {
     headerActions: {
         display: 'flex',
         gap: '0.5rem',
+        flexWrap: 'wrap',
+        alignItems: 'center',
     },
     btnPrimary: {
         background: '#00ff88',
@@ -559,6 +594,27 @@ const styles: { [key: string]: React.CSSProperties } = {
         cursor: 'pointer',
         fontWeight: 'bold',
         fontSize: '0.8rem',
+        transition: 'all 0.2s ease',
+    },
+    filterSelect: {
+        padding: '0.5rem',
+        background: '#1a1a1a',
+        border: '1px solid #1e293b',
+        borderRadius: '0.47rem',
+        color: '#e2e8f0',
+        fontSize: '0.8rem',
+        minWidth: '180px',
+        outline: 'none',
+    },
+    filterInput: {
+        padding: '0.5rem',
+        background: '#1a1a1a',
+        border: '1px solid #1e293b',
+        borderRadius: '0.47rem',
+        color: '#e2e8f0',
+        fontSize: '0.8rem',
+        minWidth: '160px',
+        outline: 'none',
     },
     tableContainer: {
         overflow: 'auto',
@@ -622,7 +678,7 @@ const styles: { [key: string]: React.CSSProperties } = {
         border: '1px solid #1a1a1a',
         borderRadius: '0.95rem',
         width: '90%',
-        maxWidth: '600px',
+        maxWidth: '650px',
         maxHeight: '90vh',
         overflow: 'auto',
         animation: 'fadeIn 0.3s ease',
@@ -681,18 +737,6 @@ const styles: { [key: string]: React.CSSProperties } = {
         letterSpacing: '0.5px',
     },
     formInput: {
-        width: '100%',
-        padding: '0.5rem 0.7rem',
-        background: '#1a1a1a',
-        border: '1px solid #1e293b',
-        borderRadius: '0.47rem',
-        color: '#e2e8f0',
-        fontSize: '0.85rem',
-        outline: 'none',
-        transition: 'border-color 0.2s ease',
-        boxSizing: 'border-box',
-    },
-    formSelect: {
         width: '100%',
         padding: '0.5rem 0.7rem',
         background: '#1a1a1a',

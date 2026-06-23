@@ -1,56 +1,34 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func, cast, Date
-from datetime import date
-from app.models.venta import Venta, VentaDetalle, MetodoPago
-from app.models.producto import Producto
-from app.models.usuario import Usuario
+from app.models import Venta, VentaDetalle, Producto
 from app.schemas.venta import VentaCreate
-
+from datetime import datetime
 
 class VentaService:
     @staticmethod
-    def registrar_venta(db: Session, venta_data: VentaCreate, usuario_id: int) -> Venta:
-        """Registra una nueva venta con sus detalles"""
-        total = sum(d.cantidad * d.precio_unit for d in venta_data.detalles)
-
+    def crear_venta(db: Session, venta_data: VentaCreate, usuario_id: int):
+        # Validar y crear venta (sin MetodoPago)
+        # El campo metodo_pago ya es string en el modelo y schema
         nueva_venta = Venta(
             sede_id=venta_data.sede_id,
             usuario_id=usuario_id,
-            total=round(total, 2),
-            metodo_pago=venta_data.metodo_pago,
-            notas=venta_data.notas
+            total=venta_data.total,
+            metodo_pago=venta_data.metodo_pago.lower(),  # Normalizar
+            efectivo=venta_data.efectivo,
+            transferencia=venta_data.transferencia,
+            notas=venta_data.notas,
+            created_at=datetime.now()
         )
-
         db.add(nueva_venta)
         db.flush()
-
-        for detalle in venta_data.detalles:
-            producto = db.query(Producto).filter(Producto.id == detalle.producto_id).first()
-            subtotal = detalle.cantidad * detalle.precio_unit
-
-            venta_detalle = VentaDetalle(
+        for detalle_data in venta_data.detalles:
+            detalle = VentaDetalle(
                 venta_id=nueva_venta.id,
-                producto_id=detalle.producto_id,
-                cantidad=detalle.cantidad,
-                precio_unit=detalle.precio_unit,
-                subtotal=round(subtotal, 2)
+                producto_id=detalle_data.producto_id,
+                cantidad=detalle_data.cantidad,
+                precio_unit=detalle_data.precio_unit,
+                precio_original=detalle_data.precio_original,
+                subtotal=detalle_data.subtotal
             )
-            db.add(venta_detalle)
-
+            db.add(detalle)
         db.commit()
-        db.refresh(nueva_venta)
         return nueva_venta
-
-    @staticmethod
-    def listar_ventas(db: Session, sede_id: int = None, fecha: date = None, metodo_pago: str = None):
-        """Lista ventas con filtros opcionales"""
-        query = db.query(Venta)
-
-        if sede_id:
-            query = query.filter(Venta.sede_id == sede_id)
-        if fecha:
-            query = query.filter(cast(Venta.created_at, Date) == fecha)
-        if metodo_pago:
-            query = query.filter(Venta.metodo_pago == metodo_pago)
-
-        return query.order_by(Venta.created_at.desc()).all()

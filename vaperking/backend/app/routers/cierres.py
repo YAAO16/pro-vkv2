@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import date, datetime
 from app.database import get_db
 from app.dependencies import get_current_user, verify_admin
 from app.models import CierreDiario, Sede, Usuario, Venta, Gasto
+from app.decorators import audit
 from pydantic import BaseModel
 from typing import Optional
 
@@ -26,7 +27,6 @@ def get_cierres(
     query = db.query(CierreDiario)
     if sede_id:
         query = query.filter(CierreDiario.sede_id == sede_id)
-    
     cierres = query.order_by(CierreDiario.fecha.desc()).all()
     return cierres
 
@@ -37,26 +37,24 @@ def preview_cierre(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    # Calcular ventas del día
     ventas = db.query(Venta).filter(
         func.date(Venta.created_at) == fecha,
         Venta.sede_id == sede_id,
         Venta.anulada == False
     ).all()
-    
+
     total_ventas = sum(v.total for v in ventas)
-    efectivo = sum(v.efectivo or 0 for v in ventas if v.metodo_pago.value in ['efectivo', 'mixto'])
-    transferencia = sum(v.transferencia or 0 for v in ventas if v.metodo_pago.value in ['transferencia', 'mixto'])
-    
-    # Calcular gastos del día
+    efectivo = sum(v.efectivo or 0 for v in ventas if v.metodo_pago in ['efectivo', 'mixto'])
+    transferencia = sum(v.transferencia or 0 for v in ventas if v.metodo_pago in ['transferencia', 'mixto'])
+
     gastos = db.query(Gasto).filter(
         Gasto.fecha == fecha,
         Gasto.sede_id == sede_id
     ).all()
     total_gastos = sum(g.valor for g in gastos)
-    
+
     balance_sistema = total_ventas - total_gastos
-    
+
     return {
         "fecha": fecha.isoformat(),
         "sede_id": sede_id,
@@ -69,56 +67,57 @@ def preview_cierre(
     }
 
 @router.post("/")
+@audit(accion="crear_cierre", tabla="cierres_diarios")  # ← Auditoría
 def crear_cierre(
-    request: CrearCierreRequest,
+    request: Request,
+    data: CrearCierreRequest,
     db: Session = Depends(get_db),
-    current_user = Depends(verify_admin)
+    current_user: Usuario = Depends(verify_admin)
 ):
-    # Verificar que no exista cierre para esa fecha
+    # Verificar si ya existe cierre para esa fecha
     existe = db.query(CierreDiario).filter(
-        CierreDiario.sede_id == request.sede_id,
-        CierreDiario.fecha == request.fecha
+        CierreDiario.sede_id == data.sede_id,
+        CierreDiario.fecha == data.fecha
     ).first()
-    
     if existe:
         raise HTTPException(status_code=400, detail="Ya existe un cierre para esta fecha")
-    
+
     # Verificar sede
-    sede = db.query(Sede).filter(Sede.id == request.sede_id).first()
+    sede = db.query(Sede).filter(Sede.id == data.sede_id).first()
     if not sede:
         raise HTTPException(status_code=404, detail="Sede no encontrada")
-    
+
     # Calcular balance del sistema
     ventas = db.query(Venta).filter(
-        func.date(Venta.created_at) == request.fecha,
-        Venta.sede_id == request.sede_id,
+        func.date(Venta.created_at) == data.fecha,
+        Venta.sede_id == data.sede_id,
         Venta.anulada == False
     ).all()
-    
     total_ventas = sum(v.total for v in ventas)
-    
+
     gastos = db.query(Gasto).filter(
-        Gasto.fecha == request.fecha,
-        Gasto.sede_id == request.sede_id
+        Gasto.fecha == data.fecha,
+        Gasto.sede_id == data.sede_id
     ).all()
     total_gastos = sum(g.valor for g in gastos)
-    
+
     balance_sistema = total_ventas - total_gastos
-    diferencia = balance_sistema - (request.efectivo_reportado + request.transferencia_reportada)
-    
+    diferencia = balance_sistema - (data.efectivo_reportado + data.transferencia_reportada)
+
+    # Crear cierre
     cierre = CierreDiario(
-        sede_id=request.sede_id,
-        fecha=request.fecha,
+        sede_id=data.sede_id,
+        fecha=data.fecha,
         balance_sistema=balance_sistema,
-        efectivo_reportado=request.efectivo_reportado,
-        transferencia_reportada=request.transferencia_reportada,
+        efectivo_reportado=data.efectivo_reportado,
+        transferencia_reportada=data.transferencia_reportada,
         diferencia=diferencia,
         cerrado_por=current_user.id,
-        observaciones=request.observaciones
+        observaciones=data.observaciones
     )
-    
+
     db.add(cierre)
     db.commit()
     db.refresh(cierre)
-    
+
     return cierre

@@ -6,16 +6,18 @@ from datetime import datetime
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Venta, VentaDetalle, Producto, Usuario, Sede
-from app.decorators import audit  # ← NUEVO
+from app.decorators import audit
 
 router = APIRouter()
 
+# Helper
 def normalizar_metodo_pago(valor: str) -> str:
     lower = valor.lower()
     if lower not in ["efectivo", "transferencia", "mixto"]:
         raise HTTPException(400, "Método de pago inválido")
     return lower
 
+# ============ SCHEMAS ============
 class VentaDetalleCreate(BaseModel):
     producto_id: int
     cantidad: int
@@ -33,8 +35,7 @@ class VentaCreate(BaseModel):
     notas: Optional[str] = None
     detalles: List[VentaDetalleCreate]
 
-class AnularVentaRequest(BaseModel):
-    motivo: str
+# ============ ENDPOINTS ============
 
 @router.get("/")
 def get_ventas(
@@ -47,11 +48,20 @@ def get_ventas(
     query = db.query(Venta)
     if sede_id:
         query = query.filter(Venta.sede_id == sede_id)
-
     total = query.count()
     ventas = query.order_by(Venta.created_at.desc()).offset(offset).limit(limit).all()
-
     return {"ventas": ventas, "total": total, "limit": limit, "offset": offset}
+
+@router.get("/{venta_id}")
+def get_venta(
+    venta_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    venta = db.query(Venta).filter(Venta.id == venta_id).first()
+    if not venta:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    return venta
 
 @router.get("/{venta_id}/detalles")
 def get_venta_detalles(
@@ -59,13 +69,16 @@ def get_venta_detalles(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
+    venta = db.query(Venta).filter(Venta.id == venta_id).first()
+    if not venta:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
     detalles = db.query(VentaDetalle).filter(VentaDetalle.venta_id == venta_id).all()
     return detalles
 
 @router.post("/")
-@audit(accion="crear_venta", tabla="ventas")  # ← DECORADOR
+@audit(accion="crear_venta", tabla="ventas")
 def crear_venta(
-    request: Request,  # ← NUEVO
+    request: Request,
     venta_data: VentaCreate,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
@@ -73,11 +86,9 @@ def crear_venta(
     usuario = db.query(Usuario).filter(Usuario.id == venta_data.usuario_id).first()
     if not usuario:
         raise HTTPException(404, "Usuario no encontrado")
-
     sede = db.query(Sede).filter(Sede.id == venta_data.sede_id).first()
     if not sede:
         raise HTTPException(404, "Sede no encontrada")
-
     for detalle in venta_data.detalles:
         producto = db.query(Producto).filter(Producto.id == detalle.producto_id).first()
         if not producto:
@@ -95,7 +106,6 @@ def crear_venta(
     )
     db.add(nueva_venta)
     db.flush()
-
     for detalle in venta_data.detalles:
         nuevo_detalle = VentaDetalle(
             venta_id=nueva_venta.id,
@@ -106,31 +116,25 @@ def crear_venta(
             subtotal=detalle.subtotal
         )
         db.add(nuevo_detalle)
-
     db.commit()
-
     return {"message": "Venta creada exitosamente", "venta_id": nueva_venta.id}
 
 @router.post("/{venta_id}/anular")
-@audit(accion="anular_venta", tabla="ventas")  # ← DECORADOR
+@audit(accion="anular_venta", tabla="ventas")
 def anular_venta(
-    request: Request,  # ← NUEVO
+    request: Request,
     venta_id: int,
-    request_data: AnularVentaRequest,
+    motivo: str,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
     venta = db.query(Venta).filter(Venta.id == venta_id).first()
     if not venta:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
-
     if venta.anulada:
         raise HTTPException(status_code=400, detail="La venta ya está anulada")
-
     venta.anulada = True
     venta.anulada_por = current_user.id
-    venta.motivo_anulacion = request_data.motivo
-
+    venta.motivo_anulacion = motivo
     db.commit()
-
     return {"message": "Venta anulada correctamente"}

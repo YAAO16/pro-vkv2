@@ -41,17 +41,6 @@ interface Venta {
     sede?: { nombre: string };
 }
 
-interface VentaDetalleFull {
-    id: number;
-    venta_id: number;
-    producto_id: number;
-    cantidad: number;
-    precio_unit: number;
-    precio_original: number | null;
-    subtotal: number;
-    producto?: { nombre: string; sku: string };
-}
-
 const Ventas: React.FC = () => {
     const { tienePermiso, isAdmin } = usePermisos();
     const { usuario } = useAuthStore();
@@ -73,8 +62,8 @@ const Ventas: React.FC = () => {
 
     // Estados para detalles de venta
     const [showDetallesModal, setShowDetallesModal] = useState(false);
-    const [ventaSeleccionada, setVentaSeleccionada] = useState<Venta | null>(null);
-    const [detallesVenta, setDetallesVenta] = useState<VentaDetalleFull[]>([]);
+    const [ventaSeleccionada, setVentaSeleccionada] = useState<any | null>(null);
+    const [detallesVenta, setDetallesVenta] = useState<any[]>([]);
     const [loadingDetalles, setLoadingDetalles] = useState(false);
 
     // Permisos
@@ -124,41 +113,28 @@ const Ventas: React.FC = () => {
         try {
             setLoadingDetalles(true);
             setShowDetallesModal(true);
-            
-            // Obtener detalles de la venta
-            const response = await apiClient.get(`/ventas/${ventaId}/detalles`);
-            const detalles = response.data;
-            
-            // Enriquecer detalles con información del producto
-            const detallesEnriquecidos = await Promise.all(
-                detalles.map(async (detalle: VentaDetalleFull) => {
-                    try {
-                        const productoResponse = await apiClient.get(`/productos/${detalle.producto_id}`);
-                        return {
-                            ...detalle,
-                            producto: productoResponse.data
-                        };
-                    } catch {
-                        return {
-                            ...detalle,
-                            producto: { nombre: 'Producto no encontrado', sku: 'N/A' }
-                        };
-                    }
-                })
-            );
-            
-            setDetallesVenta(detallesEnriquecidos);
-            
-            // Obtener la venta completa
+
+            // Obtener la venta
             const ventaResponse = await apiClient.get(`/ventas/${ventaId}`);
             setVentaSeleccionada(ventaResponse.data);
-            
-        } catch (error) {
+
+            // Obtener los detalles
+            const detallesResponse = await apiClient.get(`/ventas/${ventaId}/detalles`);
+            setDetallesVenta(detallesResponse.data);
+        } catch (error: any) {
             console.error('Error cargando detalles de venta:', error);
-            alert('Error al cargar los detalles de la venta');
+            // Cerrar el modal en caso de error
+            setShowDetallesModal(false);
+            setVentaSeleccionada(null);
+            setDetallesVenta([]);
+            alert(error.response?.data?.detail || 'Error al cargar los detalles de la venta');
         } finally {
             setLoadingDetalles(false);
         }
+    };
+
+    const formatearMoneda = (valor: number) => {
+        return valor.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     };
 
     const productosFiltrados = productos.filter(p =>
@@ -436,7 +412,6 @@ const Ventas: React.FC = () => {
                             Sede: {sedes.find(s => s.id === sedeId)?.nombre || 'Seleccionar'}
                         </p>
 
-                        {/* Selección de Sede */}
                         {isAdmin && (
                             <div style={{ marginBottom: '1rem' }}>
                                 <label style={{ color: '#64748b', fontSize: '0.7rem' }}>SEDE</label>
@@ -461,7 +436,6 @@ const Ventas: React.FC = () => {
                             </div>
                         )}
 
-                        {/* Buscador de productos */}
                         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
                             <input
                                 type="text"
@@ -518,7 +492,6 @@ const Ventas: React.FC = () => {
                             )}
                         </div>
 
-                        {/* Lista de productos */}
                         {!selectedProduct && (
                             <div style={{
                                 maxHeight: '150px',
@@ -559,7 +532,6 @@ const Ventas: React.FC = () => {
                             </div>
                         )}
 
-                        {/* Carrito */}
                         <div style={{ marginBottom: '1rem' }}>
                             <h4 style={{ color: '#e2e8f0', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
                                 🛒 CARRITO ({carrito.length} productos)
@@ -629,7 +601,6 @@ const Ventas: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Método de pago */}
                         <div style={{ marginBottom: '1rem' }}>
                             <label style={{ color: '#64748b', fontSize: '0.7rem' }}>MÉTODO DE PAGO</label>
                             <select
@@ -780,223 +751,293 @@ const Ventas: React.FC = () => {
 
             {/* Modal de Detalles de Venta */}
             {showDetallesModal && ventaSeleccionada && (
-                <div style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    background: 'rgba(0,0,0,0.95)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    zIndex: 1000,
-                    overflow: 'auto'
-                }}>
-                    <div style={{
-                        background: '#0a0a0a',
-                        border: '1px solid #00ff88',
-                        borderRadius: '0.95rem',
-                        padding: '1.9rem',
-                        width: '90%',
-                        maxWidth: '700px',
-                        maxHeight: '85vh',
-                        overflow: 'auto'
-                    }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                            <h3 style={{ color: '#00ff88' }}>📄 DETALLES DE VENTA #{ventaSeleccionada.id}</h3>
+                <div style={styles.modalOverlay}>
+                    <div style={styles.modalContent}>
+                        <div style={styles.modalHeader}>
+                            <h3 style={styles.modalTitle}>📄 DETALLES DE VENTA #{ventaSeleccionada.id}</h3>
                             <button
                                 onClick={() => {
                                     setShowDetallesModal(false);
                                     setVentaSeleccionada(null);
                                     setDetallesVenta([]);
                                 }}
-                                style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    color: '#94a3b8',
-                                    fontSize: '1.5rem',
-                                    cursor: 'pointer'
-                                }}
+                                style={styles.modalClose}
                             >
                                 ✕
                             </button>
                         </div>
 
-                        {loadingDetalles ? (
-                            <div style={{ textAlign: 'center', padding: '2rem', color: '#00ff88' }}>
-                                CARGANDO DETALLES...
-                            </div>
-                        ) : (
-                            <>
-                                {/* Información de la venta */}
-                                <div style={{
-                                    display: 'grid',
-                                    gridTemplateColumns: '1fr 1fr',
-                                    gap: '0.5rem',
-                                    background: '#1a1a1a',
-                                    padding: '1rem',
-                                    borderRadius: '0.47rem',
-                                    marginBottom: '1rem'
-                                }}>
-                                    <div>
-                                        <span style={{ color: '#64748b', fontSize: '0.7rem' }}>FECHA</span>
-                                        <p style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>
-                                            {formatearFecha(ventaSeleccionada.created_at)}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <span style={{ color: '#64748b', fontSize: '0.7rem' }}>TOTAL</span>
-                                        <p style={{ color: '#00ff88', fontSize: '0.85rem', fontWeight: 'bold' }}>
-                                            ${ventaSeleccionada.total.toLocaleString()}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <span style={{ color: '#64748b', fontSize: '0.7rem' }}>MÉTODO DE PAGO</span>
-                                        <p style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>
-                                            {ventaSeleccionada.metodo_pago.toUpperCase()}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <span style={{ color: '#64748b', fontSize: '0.7rem' }}>ESTADO</span>
-                                        <p style={{
-                                            color: ventaSeleccionada.anulada ? '#ff4444' : '#00ff88',
-                                            fontSize: '0.85rem'
-                                        }}>
-                                            {ventaSeleccionada.anulada ? '❌ ANULADA' : '✅ ACTIVA'}
-                                        </p>
-                                    </div>
-                                    {ventaSeleccionada.efectivo !== null && (
-                                        <div>
-                                            <span style={{ color: '#64748b', fontSize: '0.7rem' }}>EFECTIVO</span>
-                                            <p style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>
-                                                ${ventaSeleccionada.efectivo?.toLocaleString()}
-                                            </p>
+                        <div style={styles.modalBody}>
+                            {loadingDetalles ? (
+                                <div style={styles.loadingContainer}>
+                                    <div style={styles.loadingSpinner}></div>
+                                    <div style={styles.loadingText}>CARGANDO DETALLES...</div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div style={styles.previewHeader}>
+                                        <div style={styles.previewInfo}>
+                                            <span style={styles.previewLabel}>Fecha</span>
+                                            <span style={styles.previewValue}>
+                                                {new Date(ventaSeleccionada.created_at).toLocaleString('es-CO')}
+                                            </span>
                                         </div>
-                                    )}
-                                    {ventaSeleccionada.transferencia !== null && (
-                                        <div>
-                                            <span style={{ color: '#64748b', fontSize: '0.7rem' }}>TRANSFERENCIA</span>
-                                            <p style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>
-                                                ${ventaSeleccionada.transferencia?.toLocaleString()}
-                                            </p>
+                                        <div style={styles.previewInfo}>
+                                            <span style={styles.previewLabel}>Total</span>
+                                            <span style={{ ...styles.previewValue, color: '#00ff88', fontWeight: 'bold' }}>
+                                                ${formatearMoneda(ventaSeleccionada.total)}
+                                            </span>
                                         </div>
-                                    )}
-                                    {ventaSeleccionada.motivo_anulacion && (
-                                        <div style={{ gridColumn: '1 / -1' }}>
-                                            <span style={{ color: '#ff4444', fontSize: '0.7rem' }}>MOTIVO DE ANULACIÓN</span>
-                                            <p style={{ color: '#ff4444', fontSize: '0.85rem' }}>
-                                                {ventaSeleccionada.motivo_anulacion}
-                                            </p>
+                                        <div style={styles.previewInfo}>
+                                            <span style={styles.previewLabel}>Método de Pago</span>
+                                            <span style={styles.previewValue}>{ventaSeleccionada.metodo_pago.toUpperCase()}</span>
                                         </div>
-                                    )}
+                                    </div>
+
+                                    <h4 style={styles.cardTitle}>🛒 Productos</h4>
+                                    <div style={styles.tableContainer}>
+                                        {detallesVenta.length === 0 ? (
+                                            <p style={styles.emptyText}>No hay productos en esta venta</p>
+                                        ) : (
+                                            <table style={styles.table}>
+                                                <thead>
+                                                    <tr style={styles.tableHeader}>
+                                                        <th style={styles.th}>Producto</th>
+                                                        <th style={styles.th}>Cantidad</th>
+                                                        <th style={styles.th}>Precio Unit.</th>
+                                                        <th style={styles.th}>Subtotal</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {detallesVenta.map((detalle) => (
+                                                        <tr key={detalle.id} style={styles.tableRow}>
+                                                            <td style={styles.td}>
+                                                                {detalle.producto?.nombre || `Producto ${detalle.producto_id}`}
+                                                                <div style={{ fontSize: '0.6rem', color: '#64748b' }}>
+                                                                    SKU: {detalle.producto?.sku || 'N/A'}
+                                                                </div>
+                                                            </td>
+                                                            <td style={styles.td}>{detalle.cantidad}</td>
+                                                            <td style={styles.td}>${formatearMoneda(detalle.precio_unit)}</td>
+                                                            <td style={{ ...styles.td, color: '#00ff88' }}>
+                                                                ${formatearMoneda(detalle.subtotal)}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                                <tfoot>
+                                                    <tr style={{ borderTop: '2px solid #00ff88' }}>
+                                                        <td colSpan={3} style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 'bold', color: '#e2e8f0' }}>
+                                                            TOTAL
+                                                        </td>
+                                                        <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 'bold', color: '#00ff88' }}>
+                                                            ${formatearMoneda(ventaSeleccionada.total)}
+                                                        </td>
+                                                    </tr>
+                                                </tfoot>
+                                            </table>
+                                        )}
+                                    </div>
+
                                     {ventaSeleccionada.notas && (
-                                        <div style={{ gridColumn: '1 / -1' }}>
-                                            <span style={{ color: '#64748b', fontSize: '0.7rem' }}>NOTAS</span>
-                                            <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>
+                                        <div style={{ marginTop: '1rem' }}>
+                                            <span style={styles.previewLabel}>Notas</span>
+                                            <p style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.25rem' }}>
                                                 {ventaSeleccionada.notas}
                                             </p>
                                         </div>
                                     )}
-                                </div>
+                                </>
+                            )}
+                        </div>
 
-                                {/* Tabla de productos */}
-                                <h4 style={{ color: '#e2e8f0', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
-                                    🛒 PRODUCTOS
-                                </h4>
-                                <div style={{
-                                    border: '1px solid #1a1a1a',
-                                    borderRadius: '0.47rem',
-                                    overflow: 'auto'
-                                }}>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                        <thead>
-                                            <tr style={{ borderBottom: '1px solid #1a1a1a' }}>
-                                                <th style={{ padding: '0.5rem', textAlign: 'left', color: '#64748b', fontSize: '0.65rem' }}>Producto</th>
-                                                <th style={{ padding: '0.5rem', textAlign: 'right', color: '#64748b', fontSize: '0.65rem' }}>Cantidad</th>
-                                                <th style={{ padding: '0.5rem', textAlign: 'right', color: '#64748b', fontSize: '0.65rem' }}>Precio Unit.</th>
-                                                <th style={{ padding: '0.5rem', textAlign: 'right', color: '#64748b', fontSize: '0.65rem' }}>Subtotal</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {detallesVenta.map((detalle) => (
-                                                <tr key={detalle.id} style={{ borderBottom: '1px solid #1a1a1a' }}>
-                                                    <td style={{ padding: '0.5rem', fontSize: '0.75rem' }}>
-                                                        {detalle.producto?.nombre || 'Producto no encontrado'}
-                                                        <div style={{ color: '#64748b', fontSize: '0.6rem' }}>
-                                                            SKU: {detalle.producto?.sku || 'N/A'}
-                                                        </div>
-                                                    </td>
-                                                    <td style={{ padding: '0.5rem', textAlign: 'right', fontSize: '0.75rem' }}>
-                                                        {detalle.cantidad}
-                                                    </td>
-                                                    <td style={{ padding: '0.5rem', textAlign: 'right', fontSize: '0.75rem' }}>
-                                                        ${detalle.precio_unit.toLocaleString()}
-                                                    </td>
-                                                    <td style={{ padding: '0.5rem', textAlign: 'right', fontSize: '0.75rem', color: '#00ff88' }}>
-                                                        ${detalle.subtotal.toLocaleString()}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                            <tr style={{ borderTop: '2px solid #00ff88' }}>
-                                                <td colSpan={3} style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 'bold', color: '#e2e8f0' }}>
-                                                    TOTAL
-                                                </td>
-                                                <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 'bold', color: '#00ff88' }}>
-                                                    ${ventaSeleccionada.total.toLocaleString()}
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                {/* Botones de acción */}
-                                <div style={{ display: 'flex', gap: '0.95rem', marginTop: '1rem' }}>
-                                    {puedeAnular && !ventaSeleccionada.anulada && (
-                                        <button
-                                            onClick={() => handleAnularVenta(ventaSeleccionada.id)}
-                                            style={{
-                                                flex: 1,
-                                                padding: '0.6rem',
-                                                background: '#ff4444',
-                                                color: '#0a0a0a',
-                                                border: 'none',
-                                                borderRadius: '0.47rem',
-                                                cursor: 'pointer',
-                                                fontWeight: 'bold',
-                                                fontSize: '0.8rem'
-                                            }}
-                                        >
-                                            🗑️ ANULAR VENTA
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={() => {
-                                            setShowDetallesModal(false);
-                                            setVentaSeleccionada(null);
-                                            setDetallesVenta([]);
-                                        }}
-                                        style={{
-                                            flex: 1,
-                                            padding: '0.6rem',
-                                            background: 'transparent',
-                                            border: '1px solid #1e293b',
-                                            borderRadius: '0.47rem',
-                                            color: '#94a3b8',
-                                            cursor: 'pointer',
-                                            fontSize: '0.8rem'
-                                        }}
-                                    >
-                                        CERRAR
-                                    </button>
-                                </div>
-                            </>
-                        )}
+                        <div style={styles.modalFooter}>
+                            <button
+                                onClick={() => {
+                                    setShowDetallesModal(false);
+                                    setVentaSeleccionada(null);
+                                    setDetallesVenta([]);
+                                }}
+                                style={styles.btnCancel}
+                            >
+                                CERRAR
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
         </div>
     );
+};
+
+// ============= ESTILOS =============
+const styles: { [key: string]: React.CSSProperties } = {
+    modalOverlay: {
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0,0,0,0.85)',
+        backdropFilter: 'blur(4px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: '1rem',
+    },
+    modalContent: {
+        background: '#0f0f0f',
+        border: '1px solid #1a1a1a',
+        borderRadius: '0.95rem',
+        width: '90%',
+        maxWidth: '700px',
+        maxHeight: '90vh',
+        overflow: 'auto',
+        animation: 'fadeIn 0.3s ease',
+    },
+    modalHeader: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '1.2rem 1.5rem',
+        borderBottom: '1px solid #1a1a1a',
+        position: 'sticky',
+        top: 0,
+        background: '#0f0f0f',
+        zIndex: 1,
+    },
+    modalTitle: {
+        color: '#00ff88',
+        fontSize: '1.1rem',
+        margin: 0,
+    },
+    modalClose: {
+        background: 'none',
+        border: 'none',
+        color: '#64748b',
+        fontSize: '1.2rem',
+        cursor: 'pointer',
+        padding: '0.25rem',
+    },
+    modalBody: {
+        padding: '1.5rem',
+    },
+    modalFooter: {
+        display: 'flex',
+        justifyContent: 'flex-end',
+        gap: '0.75rem',
+        padding: '1rem 1.5rem',
+        borderTop: '1px solid #1a1a1a',
+        position: 'sticky',
+        bottom: 0,
+        background: '#0f0f0f',
+    },
+    btnCancel: {
+        padding: '0.5rem 1.5rem',
+        background: 'transparent',
+        border: '1px solid #1e293b',
+        borderRadius: '0.47rem',
+        color: '#94a3b8',
+        cursor: 'pointer',
+        fontSize: '0.8rem',
+        transition: 'all 0.2s ease',
+    },
+    loadingContainer: {
+        display: 'flex',
+        flexDirection: 'column' as const,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '2rem',
+        gap: '1rem',
+    },
+    loadingSpinner: {
+        width: '40px',
+        height: '40px',
+        border: '3px solid #1a1a1a',
+        borderTop: '3px solid #00ff88',
+        borderRadius: '50%',
+        animation: 'spin 1s linear infinite',
+    },
+    loadingText: {
+        color: '#00ff88',
+        fontSize: '1.2rem',
+        letterSpacing: '2px',
+    },
+    previewHeader: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+        gap: '0.5rem',
+        padding: '0.75rem',
+        background: '#1a1a1a',
+        borderRadius: '0.47rem',
+        marginBottom: '1rem',
+    },
+    previewInfo: {
+        display: 'flex',
+        flexDirection: 'column' as const,
+        gap: '0.15rem',
+    },
+    previewLabel: {
+        color: '#64748b',
+        fontSize: '0.6rem',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+    },
+    previewValue: {
+        color: '#e2e8f0',
+        fontSize: '0.85rem',
+        fontWeight: '500',
+    },
+    cardTitle: {
+        color: '#e2e8f0',
+        fontSize: '0.9rem',
+        margin: '0 0 1rem 0',
+    },
+    tableContainer: {
+        overflow: 'auto',
+        border: '1px solid #1a1a1a',
+        borderRadius: '0.47rem',
+        background: '#0f0f0f',
+        marginBottom: '1rem',
+    },
+    table: {
+        width: '100%',
+        borderCollapse: 'collapse',
+        fontSize: '0.8rem',
+    },
+    tableHeader: {
+        borderBottom: '1px solid #1a1a1a',
+        background: '#0a0a0a',
+    },
+    th: {
+        padding: '0.5rem 0.5rem',
+        textAlign: 'left',
+        color: '#64748b',
+        fontSize: '0.65rem',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+        fontWeight: '600',
+        position: 'sticky',
+        top: 0,
+        background: '#0a0a0a',
+        zIndex: 1,
+    },
+    td: {
+        padding: '0.5rem 0.5rem',
+        borderBottom: '1px solid #1a1a1a',
+        fontSize: '0.75rem',
+        verticalAlign: 'middle',
+    },
+    tableRow: {
+        transition: 'background 0.2s ease',
+    },
+    emptyText: {
+        color: '#64748b',
+        textAlign: 'center',
+        padding: '1rem',
+        fontSize: '0.8rem',
+    },
 };
 
 export default Ventas;

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import (
     auth, usuarios, permisos, ventas, productos, sedes,
     reportes, inventario, gastos, cierres, observaciones,
-    productos_danados, sueldos_vendedores, audit_log  # ← NUEVO
+    productos_danados, sueldos_vendedores, audit_log, reportes
 )
 import logging
 
@@ -44,6 +44,7 @@ app.include_router(observaciones.router, prefix="/api/v1/observaciones", tags=["
 app.include_router(productos_danados.router, prefix="/api/v1/productos-danados", tags=["Productos Dañados"])
 app.include_router(sueldos_vendedores.router, prefix="/api/v1/sueldos", tags=["Sueldos Vendedores"])
 app.include_router(audit_log.router, prefix="/api/v1/audit-log", tags=["Auditoría"])  # ← NUEVO
+app.include_router(reportes.router, prefix="/api/v1/reportes", tags=["Reportes"])
 
 @app.get("/")
 def root():

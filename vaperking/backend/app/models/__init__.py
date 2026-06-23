@@ -2,7 +2,7 @@
 from app.models.usuario import Usuario, RolUsuario
 from app.models.permiso import Permiso, usuario_permiso
 from app.models.producto import Producto, Categoria
-from app.models.venta import Venta, VentaDetalle, MetodoPago
+from app.models.venta import Venta, VentaDetalle
 from app.models.inventario_diario import InventarioDiario
 from app.models.cierre_diario import CierreDiario
 from app.models.gasto import Gasto
@@ -22,7 +22,6 @@ __all__ = [
     'Categoria',
     'Venta',
     'VentaDetalle',
-    'MetodoPago',
     'InventarioDiario',
     'CierreDiario',
     'Gasto',
